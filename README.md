@@ -20,6 +20,8 @@ Multimodal Reward Learning in MDD patients
   plot](#9-validation-metrics--silhouette-plot)
 - [10. Trajectories plot](#10-trajectories-plot)
 - [11. Save outputs](#11-save-outputs)
+- [11. PET analyses](#11-pet-analyses)
+- [12. Save outputs](#12-save-outputs)
 
 ## What this is
 
@@ -57,7 +59,8 @@ data_path <- "data/tabulated_data.csv"
 
 stopifnot(file.exists(data_path))
 
-df <- readr::read_csv(data_path, show_col_types = FALSE)
+df <- readr::read_csv(data_path, show_col_types = FALSE) %>%
+  mutate(ID = as.character(ID))
 
 # quick check
 dplyr::glimpse(df)
@@ -66,7 +69,7 @@ dplyr::glimpse(df)
     ## Rows: 57
     ## Columns: 39
     ## $ ...1                                     <dbl> 1, 2, 3, 4, 5, 6, 7, 8, 9, 10…
-    ## $ ID                                       <dbl> 1, 2, 3, 4, 5, 6, 7, 8, 9, 10…
+    ## $ ID                                       <chr> "1", "2", "3", "4", "5", "6",…
     ## $ Gender                                   <chr> "male", "female", "male", "ma…
     ## $ Age                                      <dbl> 20, 20, 25, 21, 41, 20, 25, 2…
     ## $ Placebo1_Med0                            <dbl> 0, 1, 1, 1, 1, 1, 0, 1, 1, 1,…
@@ -342,6 +345,226 @@ ggsave("figs/trajectories_shift_accumbens.png", p_trajectories, width = 12, heig
 ```
 
 ## 11. Save outputs
+
+``` r
+write.csv(df_with_clusters, "outputs/cluster_assignments_final.csv", row.names = FALSE)
+
+df_full_clustered <- df %>%
+  left_join(df_with_clusters %>% select(ID, cluster), by = "ID")
+
+write.csv(df_full_clustered, "outputs/full_data_with_clusters_final.csv", row.names = FALSE)
+```
+
+## 11. PET analyses
+
+``` r
+# Requires this column in data/tabulated_data.csv:
+stopifnot("PET_Gamma_divided_k2a_Session1_Accumbens" %in% names(df))
+
+# Subject-level table derived from features_scaled (Block1..Block4)
+df_plot <- as.data.frame(features_scaled)
+df_plot$ID <- rownames(features_scaled)
+
+df_plot <- df_plot %>%
+  mutate(
+    early_change = Block2 - Block1,
+    later_change = Block4 - Block3,
+    all_change   = Block4 - Block1
+  ) %>%
+  left_join(
+    df %>% select(ID, PET_Gamma_divided_k2a_Session1_Accumbens, Age, Gender),
+    by = "ID"
+  ) %>%
+  left_join(
+    df_with_clusters %>% select(ID, cluster),
+    by = "ID"
+  ) %>%
+  mutate(
+    Group  = factor(cluster),
+    Gender = factor(Gender)
+  )
+
+glimpse(df_plot)
+```
+
+    ## Rows: 57
+    ## Columns: 13
+    ## $ Block1                                   <dbl> -1.05754238, 2.58356523, -1.2…
+    ## $ Block2                                   <dbl> 1.30018053, -0.73109977, -1.6…
+    ## $ Block3                                   <dbl> -0.25746485, 1.66779746, -0.3…
+    ## $ Block4                                   <dbl> -0.68357196, 0.84308741, -0.5…
+    ## $ ID                                       <chr> "1", "10", "11", "12", "13", …
+    ## $ early_change                             <dbl> 2.3577229, -3.3146650, -0.394…
+    ## $ later_change                             <dbl> -0.426107116, -0.824710052, -…
+    ## $ all_change                               <dbl> 0.3739704, -1.7404778, 0.7644…
+    ## $ PET_Gamma_divided_k2a_Session1_Accumbens <dbl> 0.165488, 0.394323, -0.101018…
+    ## $ Age                                      <dbl> 20, 24, 26, 35, 28, 28, 26, 5…
+    ## $ Gender                                   <fct> male, female, female, female,…
+    ## $ cluster                                  <int> 1, 2, 3, 1, 2, 2, 3, 1, 2, 1,…
+    ## $ Group                                    <fct> 1, 2, 3, 1, 2, 2, 3, 1, 2, 1,…
+
+### 11a. PET violin by Group
+
+``` r
+p_pet_violin <- ggplot(
+  df_plot,
+  aes(x = Group, y = PET_Gamma_divided_k2a_Session1_Accumbens, fill = Group)
+) +
+  geom_violin(trim = FALSE, alpha = 0.4, color = NA) +
+  geom_boxplot(width = 0.18, outlier.shape = NA, alpha = 0.8) +
+  geom_jitter(width = 0.08, alpha = 0.35, size = 1.4) +
+  scale_fill_viridis_d(name = "Group") +
+  labs(
+    x = "Group",
+    y = "PET γ/k2a in NAcc"
+  ) +
+  theme_minimal(base_size = 16) +
+  theme(
+    axis.title = element_text(size = 16),
+    axis.text  = element_text(size = 14),
+    legend.position = "bottom",
+    legend.title = element_text(size = 14),
+    legend.text  = element_text(size = 13)
+  )
+
+p_pet_violin
+```
+
+![](figs/unnamed-chunk-14-1.png)<!-- -->
+
+``` r
+ggsave("figs/pet_violin_by_group.png", p_pet_violin, width = 8, height = 5, dpi = 300)
+```
+
+### 11b. PET regressions with early/later change
+
+``` r
+m_early <- lm(PET_Gamma_divided_k2a_Session1_Accumbens ~ early_change + Age + Gender, data = df_plot)
+m_late  <- lm(PET_Gamma_divided_k2a_Session1_Accumbens ~ later_change + Age + Gender, data = df_plot)
+
+summary(m_early)
+```
+
+    ## 
+    ## Call:
+    ## lm(formula = PET_Gamma_divided_k2a_Session1_Accumbens ~ early_change + 
+    ##     Age + Gender, data = df_plot)
+    ## 
+    ## Residuals:
+    ##      Min       1Q   Median       3Q      Max 
+    ## -0.48412 -0.18477 -0.02411  0.19463  0.56117 
+    ## 
+    ## Coefficients:
+    ##                Estimate Std. Error t value Pr(>|t|)  
+    ## (Intercept)  -0.0276701  0.1209537  -0.229   0.8200  
+    ## early_change -0.0717999  0.0280469  -2.560   0.0137 *
+    ## Age          -0.0004159  0.0039517  -0.105   0.9166  
+    ## Gendermale    0.1053180  0.0724234   1.454   0.1524  
+    ## ---
+    ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+    ## 
+    ## Residual standard error: 0.256 on 48 degrees of freedom
+    ##   (5 observations deleted due to missingness)
+    ## Multiple R-squared:  0.1548, Adjusted R-squared:  0.102 
+    ## F-statistic:  2.93 on 3 and 48 DF,  p-value: 0.04293
+
+``` r
+summary(m_late)
+```
+
+    ## 
+    ## Call:
+    ## lm(formula = PET_Gamma_divided_k2a_Session1_Accumbens ~ later_change + 
+    ##     Age + Gender, data = df_plot)
+    ## 
+    ## Residuals:
+    ##      Min       1Q   Median       3Q      Max 
+    ## -0.53858 -0.19110 -0.02708  0.20232  0.48829 
+    ## 
+    ## Coefficients:
+    ##                Estimate Std. Error t value Pr(>|t|)  
+    ## (Intercept)  -0.0146847  0.1226000  -0.120   0.9052  
+    ## later_change -0.0568375  0.0253279  -2.244   0.0295 *
+    ## Age          -0.0001578  0.0040156  -0.039   0.9688  
+    ## Gendermale    0.0681842  0.0752163   0.907   0.3692  
+    ## ---
+    ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+    ## 
+    ## Residual standard error: 0.2597 on 48 degrees of freedom
+    ##   (5 observations deleted due to missingness)
+    ## Multiple R-squared:  0.1306, Adjusted R-squared:  0.07626 
+    ## F-statistic: 2.404 on 3 and 48 DF,  p-value: 0.07903
+
+``` r
+write.csv(broom::tidy(m_early), "outputs/lm_pet_early_change_tidy.csv", row.names = FALSE)
+write.csv(broom::tidy(m_late),  "outputs/lm_pet_later_change_tidy.csv", row.names = FALSE)
+```
+
+### 11c. Scatterplots: PET vs early/later change
+
+``` r
+p_scatter_early <- ggplot(
+  df_plot,
+  aes(x = early_change,
+      y = PET_Gamma_divided_k2a_Session1_Accumbens,
+      color = Group)
+) +
+  geom_point(size = 2.5, alpha = 0.8) +
+  geom_smooth(method = "lm", color = "black", se = TRUE, linewidth = 1.2) +
+  scale_color_viridis_d(name = "Group") +
+  labs(
+    x = "Early change (Block2 − Block1)\nOutcome-to-cue Δ NAcc beta weights",
+    y = "PET γ/k2a in NAcc"
+  ) +
+  theme_minimal(base_size = 16) +
+  theme(
+    axis.title = element_text(size = 16),
+    axis.text  = element_text(size = 14),
+    legend.position = "bottom",
+    legend.title = element_text(size = 14),
+    legend.text  = element_text(size = 13)
+  )
+
+p_scatter_early
+```
+
+![](figs/unnamed-chunk-16-1.png)<!-- -->
+
+``` r
+ggsave("figs/pet_scatter_early_change.png", p_scatter_early, width = 8, height = 6, dpi = 300)
+
+p_scatter_late <- ggplot(
+  df_plot,
+  aes(x = later_change,
+      y = PET_Gamma_divided_k2a_Session1_Accumbens,
+      color = Group)
+) +
+  geom_point(size = 2.5, alpha = 0.8) +
+  geom_smooth(method = "lm", color = "black", se = TRUE, linewidth = 1.2) +
+  scale_color_viridis_d(name = "Group") +
+  labs(
+    x = "Later change (Block4 − Block3)\nOutcome-to-cue Δ NAcc beta weights",
+    y = "PET γ/k2a in NAcc"
+  ) +
+  theme_minimal(base_size = 16) +
+  theme(
+    axis.title = element_text(size = 16),
+    axis.text  = element_text(size = 14),
+    legend.position = "bottom",
+    legend.title = element_text(size = 14),
+    legend.text  = element_text(size = 13)
+  )
+
+p_scatter_late
+```
+
+![](figs/unnamed-chunk-16-2.png)<!-- -->
+
+``` r
+ggsave("figs/pet_scatter_later_change.png", p_scatter_late, width = 8, height = 6, dpi = 300)
+```
+
+## 12. Save outputs
 
 ``` r
 write.csv(df_with_clusters, "outputs/cluster_assignments_final.csv", row.names = FALSE)
