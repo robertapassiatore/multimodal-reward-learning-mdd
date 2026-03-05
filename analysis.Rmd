@@ -25,8 +25,6 @@ dir.create("outputs", showWarnings = FALSE)
 This README is auto-generated from `analysis.Rmd` by GitHub Actions.
 It loads **repo-local** data from `data/tabulated_data.csv` and runs preprocessing + clustering.
 
-> If you want to use your private Excel instead, keep it local and do **not** commit it to a public repo.
-
 ## Packages
 
 ```{r}
