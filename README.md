@@ -15,8 +15,7 @@ Multimodal Reward Learning (MDD) — Reproducible analysis
 - [6. Feature matrix for clustering (SHIFT_Accumbens across
   blocks)](#6-feature-matrix-for-clustering-shift_accumbens-across-blocks)
 - [7. Consensus clustering](#7-consensus-clustering)
-- [8. Mixed model (heterogeneity
-  test)](#8-mixed-model-heterogeneity-test)
+- [8. Mixed model](#8-mixed-model)
 - [9. Validation metrics + silhouette
   plot](#9-validation-metrics--silhouette-plot)
 - [10. Trajectories plot](#10-trajectories-plot)
@@ -244,7 +243,7 @@ df_diff_roi_clustered <- df_diff_roi %>%
   )
 ```
 
-## 8. Mixed model (heterogeneity test)
+## 8. Mixed model
 
 ``` r
 fit <- lmer(SHIFT_Accumbens ~ cluster * Block + Age + Gender + (1|subject),
@@ -301,7 +300,15 @@ ggsave("figs/silhouette_plot_final.png", sil_plot, width = 10, height = 6)
 
 ``` r
 df_diff_roi_clustered$Group <- df_diff_roi_clustered$cluster
+# Compute cluster sizes (needed for facet labels)
+cluster_sizes <- df_diff_roi_clustered %>%
+  dplyr::distinct(ID, Group) %>%
+  dplyr::count(Group, name = "n")
 
+labeller_vec <- setNames(
+  paste0("Group ", cluster_sizes$Group, "\n(n = ", cluster_sizes$n, ")"),
+  cluster_sizes$Group
+)
 p_trajectories <- ggplot(
   df_diff_roi_clustered,
   aes(x = as.numeric(Block), y = SHIFT_Accumbens, group = ID, color = Group)
@@ -310,6 +317,8 @@ p_trajectories <- ggplot(
   stat_summary(aes(group = Group), fun = mean, geom = "line", linewidth = 1.4) +
   stat_summary(aes(group = Group, fill = Group), fun.data = mean_se, geom = "ribbon",
                alpha = 0.2, color = NA) +
+  facet_wrap(~Group, 
+               labeller = as_labeller(labeller_vec)) +
   scale_color_viridis_d(name = "Group") +
   scale_fill_viridis_d(name = "Group") +
   labs(
