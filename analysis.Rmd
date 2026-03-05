@@ -285,7 +285,7 @@ stopifnot("PET_Gamma_divided_k2a_Session1_Accumbens" %in% names(df))
 
 # Subject-level table derived from features_scaled (Block1..Block4)
 df_plot <- as.data.frame(features_scaled)
-df_plot$ID <- rownames(features_scaled)
+df_plot$ID <- as.character(rownames(features_scaled))
 
 df_plot <- df_plot %>%
   mutate(
