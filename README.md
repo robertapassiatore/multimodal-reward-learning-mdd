@@ -1,4 +1,4 @@
-Multimodal Reward Learning (MDD) — Reproducible analysis
+Multimodal Reward Learning (MDD) 
 ================
 
 - [What this is](#what-this-is)
@@ -301,7 +301,10 @@ ggsave("figs/silhouette_plot_final.png", sil_plot, width = 10, height = 6)
 
 ``` r
 df_diff_roi_clustered$Group <- df_diff_roi_clustered$cluster
-
+labeller_vec <- setNames(
+  paste0("Group ", cluster_sizes$Group, "\n(n = ", cluster_sizes$n, ")"),
+  cluster_sizes$Group
+)
 p_trajectories <- ggplot(
   df_diff_roi_clustered,
   aes(x = as.numeric(Block), y = SHIFT_Accumbens, group = ID, color = Group)
@@ -310,6 +313,8 @@ p_trajectories <- ggplot(
   stat_summary(aes(group = Group), fun = mean, geom = "line", linewidth = 1.4) +
   stat_summary(aes(group = Group, fill = Group), fun.data = mean_se, geom = "ribbon",
                alpha = 0.2, color = NA) +
+  facet_wrap(~Group, 
+               labeller = as_labeller(labeller_vec)) +
   scale_color_viridis_d(name = "Group") +
   scale_fill_viridis_d(name = "Group") +
   labs(
