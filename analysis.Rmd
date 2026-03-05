@@ -1,5 +1,5 @@
 ---
-title: "Multimodal Reward Learning (MDD) — Reproducible analysis"
+title: "Multimodal Reward Learning in MDD patients "
 output:
   github_document:
     toc: true
