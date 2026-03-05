@@ -276,3 +276,141 @@ df_full_clustered <- df %>%
 
 write.csv(df_full_clustered, "outputs/full_data_with_clusters_final.csv", row.names = FALSE)
 ```
+## 11. PET analyses
+
+```{r}
+# Requires this column in data/tabulated_data.csv:
+stopifnot("PET_Gamma_divided_k2a_Session1_Accumbens" %in% names(df))
+
+# Subject-level table derived from features_scaled (Block1..Block4)
+df_plot <- as.data.frame(features_scaled)
+df_plot$ID <- rownames(features_scaled)
+
+df_plot <- df_plot %>%
+  mutate(
+    early_change = Block2 - Block1,
+    later_change = Block4 - Block3,
+    all_change   = Block4 - Block1
+  ) %>%
+  left_join(
+    df %>% select(ID, PET_Gamma_divided_k2a_Session1_Accumbens, Age, Gender),
+    by = "ID"
+  ) %>%
+  left_join(
+    df_with_clusters %>% select(ID, cluster),
+    by = "ID"
+  ) %>%
+  mutate(
+    Group  = factor(cluster),
+    Gender = factor(Gender)
+  )
+
+glimpse(df_plot)
+```
+
+### 11a. PET violin by Group
+
+```{r}
+p_pet_violin <- ggplot(
+  df_plot,
+  aes(x = Group, y = PET_Gamma_divided_k2a_Session1_Accumbens, fill = Group)
+) +
+  geom_violin(trim = FALSE, alpha = 0.4, color = NA) +
+  geom_boxplot(width = 0.18, outlier.shape = NA, alpha = 0.8) +
+  geom_jitter(width = 0.08, alpha = 0.35, size = 1.4) +
+  scale_fill_viridis_d(name = "Group") +
+  labs(
+    x = "Group",
+    y = "PET γ/k2a in NAcc"
+  ) +
+  theme_minimal(base_size = 16) +
+  theme(
+    axis.title = element_text(size = 16),
+    axis.text  = element_text(size = 14),
+    legend.position = "bottom",
+    legend.title = element_text(size = 14),
+    legend.text  = element_text(size = 13)
+  )
+
+p_pet_violin
+ggsave("figs/pet_violin_by_group.png", p_pet_violin, width = 8, height = 5, dpi = 300)
+```
+
+### 11b. PET regressions with early/later change
+
+```{r}
+m_early <- lm(PET_Gamma_divided_k2a_Session1_Accumbens ~ early_change + Age + Gender, data = df_plot)
+m_late  <- lm(PET_Gamma_divided_k2a_Session1_Accumbens ~ later_change + Age + Gender, data = df_plot)
+
+summary(m_early)
+summary(m_late)
+
+write.csv(broom::tidy(m_early), "outputs/lm_pet_early_change_tidy.csv", row.names = FALSE)
+write.csv(broom::tidy(m_late),  "outputs/lm_pet_later_change_tidy.csv", row.names = FALSE)
+```
+
+### 11c. Scatterplots: PET vs early/later change
+
+```{r}
+p_scatter_early <- ggplot(
+  df_plot,
+  aes(x = early_change,
+      y = PET_Gamma_divided_k2a_Session1_Accumbens,
+      color = Group)
+) +
+  geom_point(size = 2.5, alpha = 0.8) +
+  geom_smooth(method = "lm", color = "black", se = TRUE, linewidth = 1.2) +
+  scale_color_viridis_d(name = "Group") +
+  labs(
+    x = "Early change (Block2 − Block1)\nOutcome-to-cue Δ NAcc beta weights",
+    y = "PET γ/k2a in NAcc"
+  ) +
+  theme_minimal(base_size = 16) +
+  theme(
+    axis.title = element_text(size = 16),
+    axis.text  = element_text(size = 14),
+    legend.position = "bottom",
+    legend.title = element_text(size = 14),
+    legend.text  = element_text(size = 13)
+  )
+
+p_scatter_early
+ggsave("figs/pet_scatter_early_change.png", p_scatter_early, width = 8, height = 6, dpi = 300)
+
+p_scatter_late <- ggplot(
+  df_plot,
+  aes(x = later_change,
+      y = PET_Gamma_divided_k2a_Session1_Accumbens,
+      color = Group)
+) +
+  geom_point(size = 2.5, alpha = 0.8) +
+  geom_smooth(method = "lm", color = "black", se = TRUE, linewidth = 1.2) +
+  scale_color_viridis_d(name = "Group") +
+  labs(
+    x = "Later change (Block4 − Block3)\nOutcome-to-cue Δ NAcc beta weights",
+    y = "PET γ/k2a in NAcc"
+  ) +
+  theme_minimal(base_size = 16) +
+  theme(
+    axis.title = element_text(size = 16),
+    axis.text  = element_text(size = 14),
+    legend.position = "bottom",
+    legend.title = element_text(size = 14),
+    legend.text  = element_text(size = 13)
+  )
+
+p_scatter_late
+ggsave("figs/pet_scatter_later_change.png", p_scatter_late, width = 8, height = 6, dpi = 300)
+```
+
+## 12. Save outputs
+
+```{r}
+write.csv(df_with_clusters, "outputs/cluster_assignments_final.csv", row.names = FALSE)
+
+df_full_clustered <- df %>%
+  left_join(df_with_clusters %>% select(ID, cluster), by = "ID")
+
+write.csv(df_full_clustered, "outputs/full_data_with_clusters_final.csv", row.names = FALSE)
+```
+
