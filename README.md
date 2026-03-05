@@ -1,4 +1,4 @@
-Multimodal Reward Learning (MDD) — Reproducible analysis
+Multimodal Reward Learning in MDD patients
 ================
 
 - [What this is](#what-this-is)
