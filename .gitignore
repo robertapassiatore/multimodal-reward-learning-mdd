@@ -1,0 +1,11 @@
+# R
+.Rhistory
+.RData
+.Rproj.user
+
+# output dirs (keep committed if you want results tracked; remove these lines if so)
+# figs/
+# outputs/
+
+# macOS
+.DS_Store
