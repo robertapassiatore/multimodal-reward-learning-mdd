@@ -1,0 +1,60 @@
+name: Render README from analysis.Rmd
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            any::rmarkdown
+            any::knitr
+            any::readr
+            any::readxl
+            any::dplyr
+            any::tidyr
+            any::ggplot2
+            any::viridis
+            any::broom
+            any::stringr
+            any::purrr
+            any::mclust
+            any::patchwork
+            any::lmerTest
+            any::lme4
+            any::ConsensusClusterPlus
+            any::cluster
+            any::fpc
+            any::factoextra
+
+      - name: Render to README.md
+        run: |
+          Rscript -e 'rmarkdown::render("analysis.Rmd", output_file="README.md")'
+
+      - name: Commit README, figures, outputs (if changed)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add README.md figs outputs
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Auto-render README from analysis.Rmd"
+          git push
