@@ -55,7 +55,8 @@ data_path <- "data/tabulated_data.csv"
 
 stopifnot(file.exists(data_path))
 
-df <- readr::read_csv(data_path, show_col_types = FALSE)
+df <- readr::read_csv(data_path, show_col_types = FALSE) %>%
+  mutate(ID = as.character(ID))
 
 # quick check
 dplyr::glimpse(df)
