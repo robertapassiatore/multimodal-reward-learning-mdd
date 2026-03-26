@@ -188,7 +188,7 @@ df_indv <- df_diff
 df_diff_phases <- df_indv %>%
   select(ID, ROI, Block, Phase, BOLD_Large_vs_Neutral) %>%
   pivot_wider(names_from = Phase, values_from = BOLD_Large_vs_Neutral) %>%
-  mutate(SHIFT = FEED - CUE)
+  mutate(SHIFT = CUE - FEED)
 
 df_diff_roi <- df_diff_phases %>%
   pivot_wider(names_from = ROI, values_from = c(CUE, FEED, SHIFT)) %>%
@@ -278,12 +278,11 @@ final_avg_sil
     ## [1] 0.234297
 
 ``` r
-sil_plot <- factoextra::fviz_silhouette(final_sil) +
-  scale_fill_viridis_d(option = "D") +
-  labs(
-    title = paste("Silhouette plot (K =", K_FINAL, ")"),
-    subtitle = paste("Average silhouette width =", round(final_avg_sil, 3))
-  )
+sil_plot <- fviz_silhouette(final_sil) +
+  scale_fill_manual(values = c("#440154FF", "#22A884FF", "#D55E00"), name = "Group") +
+  scale_color_manual(values = c("lightpink", "lightcyan", "orange"), name = "Group") +
+  labs(title = paste("Silhouette Plot for K =", K_FINAL),
+       subtitle = paste("Average Silhouette Width =", round(final_avg_sil, 3)))
 ```
 
     ##   cluster size ave.sil.width
@@ -292,10 +291,16 @@ sil_plot <- factoextra::fviz_silhouette(final_sil) +
     ## 3       3   13          0.30
 
 ``` r
-sil_plot
+print(sil_plot)
 ```
 
 ![](figs/unnamed-chunk-10-1.png)<!-- -->
+
+``` r
+sil_plot
+```
+
+![](figs/unnamed-chunk-10-2.png)<!-- -->
 
 ``` r
 ggsave("figs/silhouette_plot_final.png", sil_plot, width = 10, height = 6)
@@ -314,26 +319,70 @@ labeller_vec <- setNames(
   paste0("Group ", cluster_sizes$Group, "\n(n = ", cluster_sizes$n, ")"),
   cluster_sizes$Group
 )
-p_trajectories <- ggplot(
-  df_diff_roi_clustered,
-  aes(x = as.numeric(Block), y = SHIFT_Accumbens, group = ID, color = Group)
-) +
-  geom_line(alpha = 0.3, linewidth = 0.5) +
-  stat_summary(aes(group = Group), fun = mean, geom = "line", linewidth = 1.4) +
-  stat_summary(aes(group = Group, fill = Group), fun.data = mean_se, geom = "ribbon",
-               alpha = 0.2, color = NA) +
+y_max <- max(df_diff_roi_clustered$SHIFT_Accumbens, na.rm = TRUE)
+y_min <- min(df_diff_roi_clustered$SHIFT_Accumbens, na.rm = TRUE)
+p_trajectories <- ggplot(df_diff_roi_clustered, 
+                         aes(x = as.numeric(Block), 
+                             y = SHIFT_Accumbens,
+                             group = ID, 
+                             color = factor(Group))) +
+  
+  # background bands
+  geom_rect(aes(xmin = -Inf, xmax = Inf, ymin = 0, ymax = Inf),
+            inherit.aes = FALSE,
+            fill = "lightblue",
+            alpha = 0.03) +
+  geom_rect(aes(xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = 0),
+            inherit.aes = FALSE,
+            fill = "mistyrose",
+            alpha = 0.03) +
+  
+  # zero line
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black", linewidth = 0.7) +
+  
+  # individual trajectories
+  geom_line(alpha = 0.3, linewidth = 0.6) +
+  
+  # mean ± SE ribbon
+  stat_summary(aes(group = Group, fill = factor(Group)), 
+               fun.data = mean_se, 
+               geom = "ribbon",
+               alpha = 0.20, 
+               color = NA) +
+  
+  # mean trajectory
+  stat_summary(aes(group = Group), 
+               fun = mean, 
+               geom = "line", 
+               linewidth = 2.2) +
+  
   facet_wrap(~Group, 
-               labeller = as_labeller(labeller_vec)) +
-  scale_color_viridis_d(name = "Group") +
-  scale_fill_viridis_d(name = "Group") +
-  labs(
-    title = "Outcome-to-cue value transfer (SHIFT_Accumbens)",
-    subtitle = paste("Consensus clustering, K =", K_FINAL),
-    x = "Block",
-    y = "SHIFT (FEED − CUE)\nLarge − Neutral"
-  ) +
-  theme_minimal(base_size = 14) +
-  theme(legend.position = "bottom")
+             labeller = as_labeller(labeller_vec)) +
+  
+  scale_color_manual(values = c("#440154FF", "#22A884FF", "#D55E00"), name = "Group") +
+  scale_fill_manual(values = c("#440154FF", "#22A884FF", "#D55E00"), guide = "none") +
+  
+  labs(title = "Consensus Clustering Solution applied to Large > Small Reward Contrast",
+       subtitle = paste("K =", K_FINAL, "| Thick line = mean ± SE"),
+       x = "Block", 
+       y = "Reward-to-cue Shift \nNAcc BOLD beta weights") +
+  
+  annotate("text", x = 4.15, y = y_max * 0.92, label = "Cue-driven value representations",
+           hjust = 1, size = 5, fontface = "bold") +
+  annotate("text", x = 4.15, y = y_min * 0.92, label = "Reward-driven value representations",
+           hjust = 1, size = 5, fontface = "bold") +
+  
+  theme_minimal(base_size = 16) +
+  theme(
+    plot.title = element_text(size = 20, face = "bold"),
+    plot.subtitle = element_text(size = 16),
+    strip.text = element_text(size = 16, face = "bold"),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 14),
+    legend.position = "bottom",
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 13)
+  )
 
 p_trajectories
 ```
@@ -389,14 +438,14 @@ glimpse(df_plot)
 
     ## Rows: 57
     ## Columns: 13
-    ## $ Block1                                   <dbl> -1.05754238, 2.58356523, -1.2…
-    ## $ Block2                                   <dbl> 1.30018053, -0.73109977, -1.6…
-    ## $ Block3                                   <dbl> -0.25746485, 1.66779746, -0.3…
-    ## $ Block4                                   <dbl> -0.68357196, 0.84308741, -0.5…
+    ## $ Block1                                   <dbl> 1.05754238, -2.58356523, 1.29…
+    ## $ Block2                                   <dbl> -1.30018053, 0.73109977, 1.68…
+    ## $ Block3                                   <dbl> 0.25746485, -1.66779746, 0.39…
+    ## $ Block4                                   <dbl> 0.68357196, -0.84308741, 0.52…
     ## $ ID                                       <chr> "1", "10", "11", "12", "13", …
-    ## $ early_change                             <dbl> 2.3577229, -3.3146650, -0.394…
-    ## $ later_change                             <dbl> -0.426107116, -0.824710052, -…
-    ## $ all_change                               <dbl> 0.3739704, -1.7404778, 0.7644…
+    ## $ early_change                             <dbl> -2.3577229, 3.3146650, 0.3941…
+    ## $ later_change                             <dbl> 0.426107116, 0.824710052, 0.1…
+    ## $ all_change                               <dbl> -0.3739704, 1.7404778, -0.764…
     ## $ PET_Gamma_divided_k2a_Session1_Accumbens <dbl> 0.165488, 0.394323, -0.101018…
     ## $ Age                                      <dbl> 20, 24, 26, 35, 28, 28, 26, 5…
     ## $ Gender                                   <fct> male, female, female, female,…
@@ -413,7 +462,7 @@ p_pet_violin <- ggplot(
   geom_violin(trim = FALSE, alpha = 0.4, color = NA) +
   geom_boxplot(width = 0.18, outlier.shape = NA, alpha = 0.8) +
   geom_jitter(width = 0.08, alpha = 0.35, size = 1.4) +
-  scale_fill_viridis_d(name = "Group") +
+  scale_fill_manual(values = c("#440154FF", "#22A884FF", "#D55E00"), name = "Group") + 
   labs(
     x = "Group",
     y = "PET γ/k2a in NAcc"
@@ -457,7 +506,7 @@ summary(m_early)
     ## Coefficients:
     ##                Estimate Std. Error t value Pr(>|t|)  
     ## (Intercept)  -0.0276701  0.1209537  -0.229   0.8200  
-    ## early_change -0.0717999  0.0280469  -2.560   0.0137 *
+    ## early_change  0.0717999  0.0280469   2.560   0.0137 *
     ## Age          -0.0004159  0.0039517  -0.105   0.9166  
     ## Gendermale    0.1053180  0.0724234   1.454   0.1524  
     ## ---
@@ -484,7 +533,7 @@ summary(m_late)
     ## Coefficients:
     ##                Estimate Std. Error t value Pr(>|t|)  
     ## (Intercept)  -0.0146847  0.1226000  -0.120   0.9052  
-    ## later_change -0.0568375  0.0253279  -2.244   0.0295 *
+    ## later_change  0.0568375  0.0253279   2.244   0.0295 *
     ## Age          -0.0001578  0.0040156  -0.039   0.9688  
     ## Gendermale    0.0681842  0.0752163   0.907   0.3692  
     ## ---
@@ -511,7 +560,7 @@ p_scatter_early <- ggplot(
 ) +
   geom_point(size = 2.5, alpha = 0.8) +
   geom_smooth(method = "lm", color = "black", se = TRUE, linewidth = 1.2) +
-  scale_color_viridis_d(name = "Group") +
+  scale_color_manual(values = c("#440154FF", "#22A884FF", "#D55E00"), name = "Group") + 
   labs(
     x = "Early change (Block2 − Block1)\nOutcome-to-cue Δ NAcc beta weights",
     y = "PET γ/k2a in NAcc"
@@ -541,7 +590,7 @@ p_scatter_late <- ggplot(
 ) +
   geom_point(size = 2.5, alpha = 0.8) +
   geom_smooth(method = "lm", color = "black", se = TRUE, linewidth = 1.2) +
-  scale_color_viridis_d(name = "Group") +
+  scale_color_manual(values = c("#440154FF", "#22A884FF", "#D55E00"), name = "Group") + 
   labs(
     x = "Later change (Block4 − Block3)\nOutcome-to-cue Δ NAcc beta weights",
     y = "PET γ/k2a in NAcc"
