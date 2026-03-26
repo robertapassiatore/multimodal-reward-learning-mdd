@@ -10,8 +10,8 @@ Multimodal Reward Learning in MDD patients
   ROI](#3-long-format--label-phase-reward-block-roi)
 - [4. Compute reward modulation (Large/Medium/Small −
   Neutral)](#4-compute-reward-modulation-largemediumsmall--neutral)
-- [5. Build SHIFT (FEED − CUE) for
-  Large-Neutral](#5-build-shift-feed--cue-for-large-neutral)
+- [5. Build SHIFT (CUE − FEED) for Large-Neutral
+  Contrast](#5-build-shift-cue--feed-for-large-neutral-contrast)
 - [6. Feature matrix for clustering (SHIFT_Accumbens across
   blocks)](#6-feature-matrix-for-clustering-shift_accumbens-across-blocks)
 - [7. Consensus clustering](#7-consensus-clustering)
@@ -180,7 +180,7 @@ df_diff <- df_long %>%
   )
 ```
 
-## 5. Build SHIFT (FEED − CUE) for Large-Neutral
+## 5. Build SHIFT (CUE − FEED) for Large-Neutral Contrast
 
 ``` r
 df_indv <- df_diff
@@ -291,16 +291,10 @@ sil_plot <- fviz_silhouette(final_sil) +
     ## 3       3   13          0.30
 
 ``` r
-print(sil_plot)
-```
-
-![](figs/unnamed-chunk-10-1.png)<!-- -->
-
-``` r
 sil_plot
 ```
 
-![](figs/unnamed-chunk-10-2.png)<!-- -->
+![](figs/unnamed-chunk-10-1.png)<!-- -->
 
 ``` r
 ggsave("figs/silhouette_plot_final.png", sil_plot, width = 10, height = 6)
