@@ -44,11 +44,12 @@ library(mclust)
 library(patchwork)
 library(lmerTest)
 library(lme4)
+library(emmeans)
 
 # clustering + validation + plotting helpers
 library(ConsensusClusterPlus)
 library(cluster)       # silhouette()
-library(fpc)           # cluster.stats() for Dunn
+library(fpc)           # cluster.stats() 
 library(factoextra)    # fviz_silhouette()
 ```
 
@@ -267,44 +268,38 @@ anova(fit)
     ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
 
 ``` r
-summary(fit)
+# Estimated marginal means
+emm <- emmeans(fit, ~ cluster * Block)
+pairs(emmeans(fit, ~ cluster | Block))
 ```
 
-    ## Linear mixed model fit by REML. t-tests use Satterthwaite's method [
-    ## lmerModLmerTest]
-    ## Formula: SHIFT_Accumbens ~ cluster * Block + Age + Gender + (1 | subject)
-    ##    Data: df_diff_roi_clustered
+    ## Block = 1:
+    ##  contrast            estimate    SE  df t.ratio p.value
+    ##  cluster1 - cluster2    1.638 0.311 201   5.271 <0.0001
+    ##  cluster1 - cluster3   -0.576 0.338 202  -1.704  0.2062
+    ##  cluster2 - cluster3   -2.213 0.369 201  -5.991 <0.0001
     ## 
-    ## REML criterion at convergence: 649.5
+    ## Block = 2:
+    ##  contrast            estimate    SE  df t.ratio p.value
+    ##  cluster1 - cluster2   -0.609 0.311 201  -1.959  0.1251
+    ##  cluster1 - cluster3   -1.807 0.338 202  -5.348 <0.0001
+    ##  cluster2 - cluster3   -1.198 0.369 201  -3.242  0.0040
     ## 
-    ## Scaled residuals: 
-    ##      Min       1Q   Median       3Q      Max 
-    ## -3.12921 -0.46045  0.03058  0.59510  2.37627 
+    ## Block = 3:
+    ##  contrast            estimate    SE  df t.ratio p.value
+    ##  cluster1 - cluster2    0.654 0.311 201   2.106  0.0911
+    ##  cluster1 - cluster3    1.929 0.338 202   5.710 <0.0001
+    ##  cluster2 - cluster3    1.275 0.369 201   3.450  0.0020
     ## 
-    ## Random effects:
-    ##  Groups   Name        Variance Std.Dev.
-    ##  subject  (Intercept) 0.1247   0.3531  
-    ##  Residual             0.8690   0.9322  
-    ## Number of obs: 228, groups:  subject, 57
+    ## Block = 4:
+    ##  contrast            estimate    SE  df t.ratio p.value
+    ##  cluster1 - cluster2   -1.379 0.311 201  -4.440 <0.0001
+    ##  cluster1 - cluster3   -0.607 0.338 202  -1.798  0.1729
+    ##  cluster2 - cluster3    0.772 0.369 201   2.090  0.0945
     ## 
-    ## Fixed effects:
-    ##                   Estimate Std. Error         df t value Pr(>|t|)    
-    ## (Intercept)       0.148612   0.313320  88.420706   0.474 0.636446    
-    ## cluster2         -1.637615   0.310679 200.850266  -5.271 3.49e-07 ***
-    ## cluster3          0.575641   0.337812 201.642832   1.704 0.089916 .  
-    ## Block2           -0.950702   0.253710 162.000000  -3.747 0.000248 ***
-    ## Block3            0.277936   0.253710 162.000000   1.095 0.274929    
-    ## Block4           -0.907056   0.253710 162.000000  -3.575 0.000462 ***
-    ## Age               0.007758   0.008449  52.000000   0.918 0.362773    
-    ## Gendermale       -0.013696   0.158491  52.000000  -0.086 0.931468    
-    ## cluster2:Block2   2.246339   0.408168 162.000000   5.503 1.43e-07 ***
-    ## cluster3:Block2   1.230944   0.445036 162.000000   2.766 0.006335 ** 
-    ## cluster2:Block3   0.983297   0.408168 162.000000   2.409 0.017116 *  
-    ## cluster3:Block3  -2.504491   0.445036 162.000000  -5.628 7.87e-08 ***
-    ## cluster2:Block4   3.017068   0.408168 162.000000   7.392 7.32e-12 ***
-    ## cluster3:Block4   0.031695   0.445036 162.000000   0.071 0.943310    
-    ## ---
-    ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+    ## Results are averaged over the levels of: Gender 
+    ## Degrees-of-freedom method: kenward-roger 
+    ## P value adjustment: tukey method for comparing a family of 3 estimates
 
 ## 9. Validation metrics + silhouette plot
 
