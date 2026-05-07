@@ -208,6 +208,7 @@ df_diff_roi_clustered <- df_diff_roi %>%
 fit <- lmer(SHIFT_Accumbens ~ cluster * Block + Age + Gender + (1|subject),
             data = df_diff_roi_clustered)
 anova(fit)
+summary(fit)
 ```
 
 ## 9. Validation metrics + silhouette plot
