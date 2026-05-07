@@ -40,11 +40,12 @@ library(mclust)
 library(patchwork)
 library(lmerTest)
 library(lme4)
+library(emmeans)
 
 # clustering + validation + plotting helpers
 library(ConsensusClusterPlus)
 library(cluster)       # silhouette()
-library(fpc)           # cluster.stats() for Dunn
+library(fpc)           # cluster.stats() 
 library(factoextra)    # fviz_silhouette()
 ```
 
@@ -208,7 +209,10 @@ df_diff_roi_clustered <- df_diff_roi %>%
 fit <- lmer(SHIFT_Accumbens ~ cluster * Block + Age + Gender + (1|subject),
             data = df_diff_roi_clustered)
 anova(fit)
-summary(fit)
+# Estimated marginal means
+emm <- emmeans(fit, ~ cluster * Block)
+pairs(emmeans(fit, ~ cluster | Block))
+
 ```
 
 ## 9. Validation metrics + silhouette plot
