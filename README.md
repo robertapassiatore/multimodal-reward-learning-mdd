@@ -22,6 +22,8 @@ Multimodal Reward Learning in MDD patients
 - [11. Save outputs](#11-save-outputs)
 - [11. PET analyses](#11-pet-analyses)
 - [12. Save outputs](#12-save-outputs)
+- [13. Cluster predictability (multinomial
+  models)](#13-cluster-predictability-multinomial-models)
 
 ## What this is
 
@@ -651,4 +653,136 @@ df_full_clustered <- df %>%
   left_join(df_with_clusters %>% select(ID, cluster), by = "ID")
 
 write.csv(df_full_clustered, "outputs/full_data_with_clusters_final.csv", row.names = FALSE)
+```
+
+## 13. Cluster predictability (multinomial models)
+
+``` r
+library(caret)
+library(nnet)
+library(MLmetrics)
+library(pROC)
+
+run_block_model <- function(data, predictor) {
+  
+  df <- data %>%
+    select(cluster, all_of(predictor)) %>%
+    na.omit()
+  
+  df$cluster <- as.factor(as.character(df$cluster))
+  
+  ctrl <- trainControl(
+    method          = "repeatedcv",
+    number          = 10,
+    repeats         = 5,
+    classProbs      = TRUE,
+    summaryFunction = multiClassSummary,
+    savePredictions = "final"
+  )
+  
+  model <- train(
+    cluster ~ .,
+    data      = df,
+    method    = "multinom",
+    trControl = ctrl,
+    trace     = FALSE
+  )
+  
+  best_idx <- which.max(model$results$Accuracy)
+  
+  list(
+    model    = model,
+    accuracy = model$results$Accuracy[best_idx],
+    auc      = model$results$AUC[best_idx]
+  )
+}
+
+# ---- Build dataset ----
+dat <- df_with_clusters[, c("ID", "cluster")] %>%
+  cbind(features_scaled)
+
+dat$Early   <- dat$Block2 - dat$Block1
+dat$Later   <- dat$Block4 - dat$Block3
+dat$Overall <- dat$Block4 - dat$Block1
+dat$Ortho   <- residuals(lm(Block4 ~ Block1, dat))
+
+dat$cluster <- factor(dat$cluster,
+                      levels = c(1, 2, 3),
+                      labels = c("C1", "C2", "C3"))
+
+# ---- Run models ----
+predictors <- c("Block1","Block2","Block3","Block4",
+                "Early","Later","Overall","Ortho")
+
+results <- lapply(predictors, function(p) run_block_model(dat, p))
+names(results) <- predictors
+
+# ---- Summary ----
+summary_df <- data.frame(
+  Predictor = predictors,
+  Accuracy  = sapply(results, `[[`, "accuracy"),
+  AUC       = sapply(results, `[[`, "auc")
+)
+
+print(summary_df)
+```
+
+    ##         Predictor  Accuracy       AUC
+    ## Block1     Block1 0.6064286 0.7803148
+    ## Block2     Block2 0.5285714 0.6605000
+    ## Block3     Block3 0.6360476 0.7932222
+    ## Block4     Block4 0.6025714 0.8352037
+    ## Early       Early 0.5969048 0.7034630
+    ## Later       Later 0.6476667 0.8395926
+    ## Overall   Overall 0.7009524 0.8518704
+    ## Ortho       Ortho 0.5938095 0.8130556
+
+``` r
+write.csv(summary_df, "outputs/cluster_predictability_summary.csv", row.names = FALSE)
+
+## 14. Apply clustering model to NEW dataset
+```
+
+``` r
+# Load new dataset
+df_new <- read.csv("data/tabulated_data_secondary.csv")
+
+# ---- Preprocess exactly as you did ----
+roi_cols <- colnames(df_new[,c(3:6)])
+
+df_new_wins <- df_new %>%
+  group_by(diagnosis, treatment) %>%
+  mutate(across(all_of(roi_cols), winsorize_iqr)) %>%
+  ungroup()
+
+df_new_wins <- df_new_wins %>%
+  mutate(
+    CUE_Accumbens  = CUE_Accumbens_Reward  - CUE_Accumbens_Neutral,
+    FEED_Accumbens = FEED_Accumbens_Reward - FEED_Accumbens_Neutral,
+    SHIFT_Accumbens = CUE_Accumbens - FEED_Accumbens
+  )
+
+# ---- Use BEST predictor ----
+best_predictor <- "Block4"  
+
+# Train final model on full original data
+train_data <- dat %>%
+  select(cluster, Block4) %>%
+  na.omit()
+
+model_final <- multinom(cluster ~ Block4, data = train_data, trace = FALSE)
+
+# ---- Apply to new data ----
+pred_probs <- predict(model_final,
+                      newdata = data.frame(Block4 = df_new_wins$SHIFT_Accumbens),
+                      type = "probs")
+
+pred_class <- colnames(pred_probs)[max.col(pred_probs)]
+
+df_new_wins$cluster_pred <- pred_class
+
+# ---- Save ----
+write.csv(df_new_wins,
+          "outputs/new_dataset_with_predicted_clusters.csv",
+          row.names = FALSE)
 ```
