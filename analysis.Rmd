@@ -775,10 +775,10 @@ p_forest <- ggplot(forest_data, aes(x = OR, y = Stratum, color = significant)) +
            ymin = -Inf, ymax = Inf,
            fill = "#E8DAEF", alpha = 0.25) +
   annotate("text", x = 0.08, y = 0.4,
-           label = "MDD \u2192 C1\n(outcome-dominant)",
+           label = "MDD \u2192 Group 1\n(outcome-dominant)",
            color = "gray30", size = 3, fontface = "italic") +
   annotate("text", x = 3.5, y = 0.4,
-           label = "MDD \u2192 C2\n(cue-driven)",
+           label = "MDD \u2192 Group 2\n(cue-driven)",
            color = "gray30", size = 3, fontface = "italic") +
   labs(
     x       = "Odds Ratio: Group 2 vs Group 1 (MDD relative to HC)  [log scale]",
