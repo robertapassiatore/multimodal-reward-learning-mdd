@@ -10,8 +10,8 @@ Multimodal Reward Learning in MDD patients
   ROI](#3-long-format--label-phase-reward-block-roi)
 - [4. Compute reward modulation (Large/Medium/Small −
   Neutral)](#4-compute-reward-modulation-largemediumsmall--neutral)
-- [5. Build SHIFT (FEED − CUE) for
-  Large-Neutral](#5-build-shift-feed--cue-for-large-neutral)
+- [5. Build SHIFT (CUE − FEED) for Large-Neutral
+  Contrast](#5-build-shift-cue--feed-for-large-neutral-contrast)
 - [6. Feature matrix for clustering (SHIFT_Accumbens across
   blocks)](#6-feature-matrix-for-clustering-shift_accumbens-across-blocks)
 - [7. Consensus clustering](#7-consensus-clustering)
@@ -20,6 +20,8 @@ Multimodal Reward Learning in MDD patients
   plot](#9-validation-metrics--silhouette-plot)
 - [10. Trajectories plot](#10-trajectories-plot)
 - [11. Save outputs](#11-save-outputs)
+- [11. PET analyses](#11-pet-analyses)
+- [12. Save outputs](#12-save-outputs)
 
 ## What this is
 
@@ -42,11 +44,12 @@ library(mclust)
 library(patchwork)
 library(lmerTest)
 library(lme4)
+library(emmeans)
 
 # clustering + validation + plotting helpers
 library(ConsensusClusterPlus)
 library(cluster)       # silhouette()
-library(fpc)           # cluster.stats() for Dunn
+library(fpc)           # cluster.stats() 
 library(factoextra)    # fviz_silhouette()
 ```
 
@@ -57,51 +60,54 @@ data_path <- "data/tabulated_data.csv"
 
 stopifnot(file.exists(data_path))
 
-df <- readr::read_csv(data_path, show_col_types = FALSE)
+df <- readr::read_csv(data_path, show_col_types = FALSE) %>%
+  mutate(ID = as.character(ID))
 
 # quick check
 dplyr::glimpse(df)
 ```
 
     ## Rows: 57
-    ## Columns: 37
-    ## $ ...1                         <dbl> 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13…
-    ## $ ID                           <dbl> 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13…
-    ## $ Gender                       <chr> "male", "female", "male", "male", "female…
-    ## $ Age                          <dbl> 20, 20, 25, 21, 41, 20, 25, 22, 25, 24, 2…
-    ## $ Placebo1_Med0                <dbl> 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1,…
-    ## $ Accumbens_neutral_cue_block1 <dbl> 0.12972732, 0.60037232, 0.43053132, -0.32…
-    ## $ Accumbens_neutral_cue_block2 <dbl> 0.45606132, -1.94993732, 0.10313432, 0.42…
-    ## $ Accumbens_neutral_cue_block3 <dbl> -2.55305832, -0.27040532, -1.68230932, -0…
-    ## $ Accumbens_neutral_cue_block4 <dbl> -1.78331332, 1.10315432, 0.22744732, -1.7…
-    ## $ Accumbens_small_cue_block1   <dbl> 0.97013332, -0.13071732, -0.30256132, -0.…
-    ## $ Accumbens_small_cue_block2   <dbl> 0.69092932, -1.98736732, -0.53309932, 0.6…
-    ## $ Accumbens_small_cue_block3   <dbl> -0.86192832, 0.31881332, -0.37774932, -0.…
-    ## $ Accumbens_small_cue_block4   <dbl> -2.3884963, 1.2862543, 0.8822353, -1.7227…
-    ## $ Accumbens_medium_cue_block1  <dbl> 0.88436832, 0.55068832, -0.46931332, 0.53…
-    ## $ Accumbens_medium_cue_block2  <dbl> 1.24813632, -1.73516632, -0.40330132, 0.5…
-    ## $ Accumbens_medium_cue_block3  <dbl> -1.38070132, -0.40730632, 0.11918732, -0.…
-    ## $ Accumbens_medium_cue_block4  <dbl> -1.37276232, 1.61526632, 0.78882732, -1.2…
-    ## $ Accumbens_large_cue_block1   <dbl> -0.06297132, -1.47909832, 0.04907432, -1.…
-    ## $ Accumbens_large_cue_block2   <dbl> -0.18494932, -2.65938832, -0.42447232, -0…
-    ## $ Accumbens_large_cue_block3   <dbl> -1.39582932, 0.21508632, -1.23021332, 0.4…
-    ## $ Accumbens_large_cue_block4   <dbl> -1.18746932, 2.11181532, 1.22754732, -1.0…
-    ## $ Accumbens_neutral_FB_block1  <dbl> 2.39798032, 0.25903132, 0.72415132, 0.147…
-    ## $ Accumbens_neutral_FB_block2  <dbl> -0.43400832, -0.41715232, 1.02981432, 0.2…
-    ## $ Accumbens_neutral_FB_block3  <dbl> -0.02126332, 1.16361732, -0.16448232, 0.0…
-    ## $ Accumbens_neutral_FB_block4  <dbl> 0.11647532, 0.80733132, 0.71955332, -1.39…
-    ## $ Accumbens_small_FB_block1    <dbl> 2.57384432, 1.08259332, 1.54693032, -0.65…
-    ## $ Accumbens_small_FB_block2    <dbl> 0.95018132, -0.89703732, 0.43300732, -0.7…
-    ## $ Accumbens_small_FB_block3    <dbl> -1.0461243, 1.2120623, 0.1873093, 0.45781…
-    ## $ Accumbens_small_FB_block4    <dbl> -0.24037832, 1.01071632, 0.95906132, 1.06…
-    ## $ Accumbens_medium_FB_block1   <dbl> 1.38296332, 2.16054532, 1.12157232, -0.49…
-    ## $ Accumbens_medium_FB_block2   <dbl> 1.39321532, 0.58737432, 0.71667832, 1.404…
-    ## $ Accumbens_medium_FB_block3   <dbl> -0.21955932, -0.34362632, -0.30904132, 0.…
-    ## $ Accumbens_medium_FB_block4   <dbl> 0.10481132, 1.13842432, 1.08714332, -0.75…
-    ## $ Accumbens_large_FB_block1    <dbl> 1.6383273, 3.6799923, 0.9725553, -0.43574…
-    ## $ Accumbens_large_FB_block2    <dbl> 1.09787632, 1.49345332, 0.97333332, 1.163…
-    ## $ Accumbens_large_FB_block3    <dbl> 0.99669532, 0.90392232, -0.39124332, 0.89…
-    ## $ Accumbens_large_FB_block4    <dbl> 0.36977032, 1.04054032, 0.50248832, 0.299…
+    ## Columns: 39
+    ## $ ...1                                     <dbl> 1, 2, 3, 4, 5, 6, 7, 8, 9, 10…
+    ## $ ID                                       <chr> "1", "2", "3", "4", "5", "6",…
+    ## $ Gender                                   <chr> "male", "female", "male", "ma…
+    ## $ Age                                      <dbl> 20, 20, 25, 21, 41, 20, 25, 2…
+    ## $ Placebo1_Med0                            <dbl> 0, 1, 1, 1, 1, 1, 0, 1, 1, 1,…
+    ## $ Accumbens_neutral_cue_block1             <dbl> 0.12972732, 0.60037232, 0.430…
+    ## $ Accumbens_neutral_cue_block2             <dbl> 0.45606132, -1.94993732, 0.10…
+    ## $ Accumbens_neutral_cue_block3             <dbl> -2.55305832, -0.27040532, -1.…
+    ## $ Accumbens_neutral_cue_block4             <dbl> -1.78331332, 1.10315432, 0.22…
+    ## $ Accumbens_small_cue_block1               <dbl> 0.97013332, -0.13071732, -0.3…
+    ## $ Accumbens_small_cue_block2               <dbl> 0.69092932, -1.98736732, -0.5…
+    ## $ Accumbens_small_cue_block3               <dbl> -0.86192832, 0.31881332, -0.3…
+    ## $ Accumbens_small_cue_block4               <dbl> -2.3884963, 1.2862543, 0.8822…
+    ## $ Accumbens_medium_cue_block1              <dbl> 0.88436832, 0.55068832, -0.46…
+    ## $ Accumbens_medium_cue_block2              <dbl> 1.24813632, -1.73516632, -0.4…
+    ## $ Accumbens_medium_cue_block3              <dbl> -1.38070132, -0.40730632, 0.1…
+    ## $ Accumbens_medium_cue_block4              <dbl> -1.37276232, 1.61526632, 0.78…
+    ## $ Accumbens_large_cue_block1               <dbl> -0.06297132, -1.47909832, 0.0…
+    ## $ Accumbens_large_cue_block2               <dbl> -0.18494932, -2.65938832, -0.…
+    ## $ Accumbens_large_cue_block3               <dbl> -1.39582932, 0.21508632, -1.2…
+    ## $ Accumbens_large_cue_block4               <dbl> -1.18746932, 2.11181532, 1.22…
+    ## $ Accumbens_neutral_FB_block1              <dbl> 2.39798032, 0.25903132, 0.724…
+    ## $ Accumbens_neutral_FB_block2              <dbl> -0.43400832, -0.41715232, 1.0…
+    ## $ Accumbens_neutral_FB_block3              <dbl> -0.02126332, 1.16361732, -0.1…
+    ## $ Accumbens_neutral_FB_block4              <dbl> 0.11647532, 0.80733132, 0.719…
+    ## $ Accumbens_small_FB_block1                <dbl> 2.57384432, 1.08259332, 1.546…
+    ## $ Accumbens_small_FB_block2                <dbl> 0.95018132, -0.89703732, 0.43…
+    ## $ Accumbens_small_FB_block3                <dbl> -1.0461243, 1.2120623, 0.1873…
+    ## $ Accumbens_small_FB_block4                <dbl> -0.24037832, 1.01071632, 0.95…
+    ## $ Accumbens_medium_FB_block1               <dbl> 1.38296332, 2.16054532, 1.121…
+    ## $ Accumbens_medium_FB_block2               <dbl> 1.39321532, 0.58737432, 0.716…
+    ## $ Accumbens_medium_FB_block3               <dbl> -0.21955932, -0.34362632, -0.…
+    ## $ Accumbens_medium_FB_block4               <dbl> 0.10481132, 1.13842432, 1.087…
+    ## $ Accumbens_large_FB_block1                <dbl> 1.6383273, 3.6799923, 0.97255…
+    ## $ Accumbens_large_FB_block2                <dbl> 1.09787632, 1.49345332, 0.973…
+    ## $ Accumbens_large_FB_block3                <dbl> 0.99669532, 0.90392232, -0.39…
+    ## $ Accumbens_large_FB_block4                <dbl> 0.36977032, 1.04054032, 0.502…
+    ## $ PET_BP_Session1_Accumbens_Winsorize      <dbl> 2.842319, 3.185009, 1.562276,…
+    ## $ PET_Gamma_divided_k2a_Session1_Accumbens <dbl> 0.165488, 0.283617, 0.123568,…
 
 ## 2. Select ROI BOLD columns (Cue + Feedback × blocks)
 
@@ -175,7 +181,7 @@ df_diff <- df_long %>%
   )
 ```
 
-## 5. Build SHIFT (FEED − CUE) for Large-Neutral
+## 5. Build SHIFT (CUE − FEED) for Large-Neutral Contrast
 
 ``` r
 df_indv <- df_diff
@@ -183,7 +189,7 @@ df_indv <- df_diff
 df_diff_phases <- df_indv %>%
   select(ID, ROI, Block, Phase, BOLD_Large_vs_Neutral) %>%
   pivot_wider(names_from = Phase, values_from = BOLD_Large_vs_Neutral) %>%
-  mutate(SHIFT = FEED - CUE)
+  mutate(SHIFT = CUE - FEED)
 
 df_diff_roi <- df_diff_phases %>%
   pivot_wider(names_from = ROI, values_from = c(CUE, FEED, SHIFT)) %>%
@@ -261,6 +267,40 @@ anova(fit)
     ## ---
     ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
 
+``` r
+# Estimated marginal means
+emm <- emmeans(fit, ~ cluster * Block)
+pairs(emmeans(fit, ~ cluster | Block))
+```
+
+    ## Block = 1:
+    ##  contrast            estimate    SE  df t.ratio p.value
+    ##  cluster1 - cluster2    1.638 0.311 201   5.271 <0.0001
+    ##  cluster1 - cluster3   -0.576 0.338 202  -1.704  0.2062
+    ##  cluster2 - cluster3   -2.213 0.369 201  -5.991 <0.0001
+    ## 
+    ## Block = 2:
+    ##  contrast            estimate    SE  df t.ratio p.value
+    ##  cluster1 - cluster2   -0.609 0.311 201  -1.959  0.1251
+    ##  cluster1 - cluster3   -1.807 0.338 202  -5.348 <0.0001
+    ##  cluster2 - cluster3   -1.198 0.369 201  -3.242  0.0040
+    ## 
+    ## Block = 3:
+    ##  contrast            estimate    SE  df t.ratio p.value
+    ##  cluster1 - cluster2    0.654 0.311 201   2.106  0.0911
+    ##  cluster1 - cluster3    1.929 0.338 202   5.710 <0.0001
+    ##  cluster2 - cluster3    1.275 0.369 201   3.450  0.0020
+    ## 
+    ## Block = 4:
+    ##  contrast            estimate    SE  df t.ratio p.value
+    ##  cluster1 - cluster2   -1.379 0.311 201  -4.440 <0.0001
+    ##  cluster1 - cluster3   -0.607 0.338 202  -1.798  0.1729
+    ##  cluster2 - cluster3    0.772 0.369 201   2.090  0.0945
+    ## 
+    ## Results are averaged over the levels of: Gender 
+    ## Degrees-of-freedom method: kenward-roger 
+    ## P value adjustment: tukey method for comparing a family of 3 estimates
+
 ## 9. Validation metrics + silhouette plot
 
 ``` r
@@ -273,12 +313,11 @@ final_avg_sil
     ## [1] 0.234297
 
 ``` r
-sil_plot <- factoextra::fviz_silhouette(final_sil) +
-  scale_fill_viridis_d(option = "D") +
-  labs(
-    title = paste("Silhouette plot (K =", K_FINAL, ")"),
-    subtitle = paste("Average silhouette width =", round(final_avg_sil, 3))
-  )
+sil_plot <- fviz_silhouette(final_sil) +
+  scale_fill_manual(values = c("#440154FF", "#22A884FF", "#D55E00"), name = "Group") +
+  scale_color_manual(values = c("lightpink", "lightcyan", "orange"), name = "Group") +
+  labs(title = paste("Silhouette Plot for K =", K_FINAL),
+       subtitle = paste("Average Silhouette Width =", round(final_avg_sil, 3)))
 ```
 
     ##   cluster size ave.sil.width
@@ -309,26 +348,70 @@ labeller_vec <- setNames(
   paste0("Group ", cluster_sizes$Group, "\n(n = ", cluster_sizes$n, ")"),
   cluster_sizes$Group
 )
-p_trajectories <- ggplot(
-  df_diff_roi_clustered,
-  aes(x = as.numeric(Block), y = SHIFT_Accumbens, group = ID, color = Group)
-) +
-  geom_line(alpha = 0.3, linewidth = 0.5) +
-  stat_summary(aes(group = Group), fun = mean, geom = "line", linewidth = 1.4) +
-  stat_summary(aes(group = Group, fill = Group), fun.data = mean_se, geom = "ribbon",
-               alpha = 0.2, color = NA) +
+y_max <- max(df_diff_roi_clustered$SHIFT_Accumbens, na.rm = TRUE)
+y_min <- min(df_diff_roi_clustered$SHIFT_Accumbens, na.rm = TRUE)
+p_trajectories <- ggplot(df_diff_roi_clustered, 
+                         aes(x = as.numeric(Block), 
+                             y = SHIFT_Accumbens,
+                             group = ID, 
+                             color = factor(Group))) +
+  
+  # background bands
+  geom_rect(aes(xmin = -Inf, xmax = Inf, ymin = 0, ymax = Inf),
+            inherit.aes = FALSE,
+            fill = "lightblue",
+            alpha = 0.03) +
+  geom_rect(aes(xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = 0),
+            inherit.aes = FALSE,
+            fill = "mistyrose",
+            alpha = 0.03) +
+  
+  # zero line
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black", linewidth = 0.7) +
+  
+  # individual trajectories
+  geom_line(alpha = 0.3, linewidth = 0.6) +
+  
+  # mean ± SE ribbon
+  stat_summary(aes(group = Group, fill = factor(Group)), 
+               fun.data = mean_se, 
+               geom = "ribbon",
+               alpha = 0.20, 
+               color = NA) +
+  
+  # mean trajectory
+  stat_summary(aes(group = Group), 
+               fun = mean, 
+               geom = "line", 
+               linewidth = 2.2) +
+  
   facet_wrap(~Group, 
-               labeller = as_labeller(labeller_vec)) +
-  scale_color_viridis_d(name = "Group") +
-  scale_fill_viridis_d(name = "Group") +
-  labs(
-    title = "Outcome-to-cue value transfer (SHIFT_Accumbens)",
-    subtitle = paste("Consensus clustering, K =", K_FINAL),
-    x = "Block",
-    y = "SHIFT (FEED − CUE)\nLarge − Neutral"
-  ) +
-  theme_minimal(base_size = 14) +
-  theme(legend.position = "bottom")
+             labeller = as_labeller(labeller_vec)) +
+  
+  scale_color_manual(values = c("#440154FF", "#22A884FF", "#D55E00"), name = "Group") +
+  scale_fill_manual(values = c("#440154FF", "#22A884FF", "#D55E00"), guide = "none") +
+  
+  labs(title = "Consensus Clustering Solution applied to Large > Small Reward Contrast",
+       subtitle = paste("K =", K_FINAL, "| Thick line = mean ± SE"),
+       x = "Block", 
+       y = "Reward-to-cue Shift \nNAcc BOLD beta weights") +
+  
+  annotate("text", x = 4.15, y = y_max * 0.92, label = "Cue-driven value representations",
+           hjust = 1, size = 5, fontface = "bold") +
+  annotate("text", x = 4.15, y = y_min * 0.92, label = "Reward-driven value representations",
+           hjust = 1, size = 5, fontface = "bold") +
+  
+  theme_minimal(base_size = 16) +
+  theme(
+    plot.title = element_text(size = 20, face = "bold"),
+    plot.subtitle = element_text(size = 16),
+    strip.text = element_text(size = 16, face = "bold"),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 14),
+    legend.position = "bottom",
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 13)
+  )
 
 p_trajectories
 ```
@@ -340,6 +423,226 @@ ggsave("figs/trajectories_shift_accumbens.png", p_trajectories, width = 12, heig
 ```
 
 ## 11. Save outputs
+
+``` r
+write.csv(df_with_clusters, "outputs/cluster_assignments_final.csv", row.names = FALSE)
+
+df_full_clustered <- df %>%
+  left_join(df_with_clusters %>% select(ID, cluster), by = "ID")
+
+write.csv(df_full_clustered, "outputs/full_data_with_clusters_final.csv", row.names = FALSE)
+```
+
+## 11. PET analyses
+
+``` r
+# Requires this column in data/tabulated_data.csv:
+stopifnot("PET_Gamma_divided_k2a_Session1_Accumbens" %in% names(df))
+
+# Subject-level table derived from features_scaled (Block1..Block4)
+df_plot <- as.data.frame(features_scaled)
+df_plot$ID <- as.character(rownames(features_scaled))
+
+df_plot <- df_plot %>%
+  mutate(
+    early_change = Block2 - Block1,
+    later_change = Block4 - Block3,
+    all_change   = Block4 - Block1
+  ) %>%
+  left_join(
+    df %>% select(ID, PET_Gamma_divided_k2a_Session1_Accumbens, Age, Gender),
+    by = "ID"
+  ) %>%
+  left_join(
+    df_with_clusters %>% select(ID, cluster),
+    by = "ID"
+  ) %>%
+  mutate(
+    Group  = factor(cluster),
+    Gender = factor(Gender)
+  )
+
+glimpse(df_plot)
+```
+
+    ## Rows: 57
+    ## Columns: 13
+    ## $ Block1                                   <dbl> 1.05754238, -2.58356523, 1.29…
+    ## $ Block2                                   <dbl> -1.30018053, 0.73109977, 1.68…
+    ## $ Block3                                   <dbl> 0.25746485, -1.66779746, 0.39…
+    ## $ Block4                                   <dbl> 0.68357196, -0.84308741, 0.52…
+    ## $ ID                                       <chr> "1", "10", "11", "12", "13", …
+    ## $ early_change                             <dbl> -2.3577229, 3.3146650, 0.3941…
+    ## $ later_change                             <dbl> 0.426107116, 0.824710052, 0.1…
+    ## $ all_change                               <dbl> -0.3739704, 1.7404778, -0.764…
+    ## $ PET_Gamma_divided_k2a_Session1_Accumbens <dbl> 0.165488, 0.394323, -0.101018…
+    ## $ Age                                      <dbl> 20, 24, 26, 35, 28, 28, 26, 5…
+    ## $ Gender                                   <fct> male, female, female, female,…
+    ## $ cluster                                  <int> 1, 2, 3, 1, 2, 2, 3, 1, 2, 1,…
+    ## $ Group                                    <fct> 1, 2, 3, 1, 2, 2, 3, 1, 2, 1,…
+
+### 11a. PET violin by Group
+
+``` r
+p_pet_violin <- ggplot(
+  df_plot,
+  aes(x = Group, y = PET_Gamma_divided_k2a_Session1_Accumbens, fill = Group)
+) +
+  geom_violin(trim = FALSE, alpha = 0.4, color = NA) +
+  geom_boxplot(width = 0.18, outlier.shape = NA, alpha = 0.8) +
+  geom_jitter(width = 0.08, alpha = 0.35, size = 1.4) +
+  scale_fill_manual(values = c("#440154FF", "#22A884FF", "#D55E00"), name = "Group") + 
+  labs(
+    x = "Group",
+    y = "PET γ/k2a in NAcc"
+  ) +
+  theme_minimal(base_size = 16) +
+  theme(
+    axis.title = element_text(size = 16),
+    axis.text  = element_text(size = 14),
+    legend.position = "bottom",
+    legend.title = element_text(size = 14),
+    legend.text  = element_text(size = 13)
+  )
+
+p_pet_violin
+```
+
+![](figs/unnamed-chunk-14-1.png)<!-- -->
+
+``` r
+ggsave("figs/pet_violin_by_group.png", p_pet_violin, width = 8, height = 5, dpi = 300)
+```
+
+### 11b. PET regressions with early/later change
+
+``` r
+m_early <- lm(PET_Gamma_divided_k2a_Session1_Accumbens ~ early_change + Age + Gender, data = df_plot)
+m_late  <- lm(PET_Gamma_divided_k2a_Session1_Accumbens ~ later_change + Age + Gender, data = df_plot)
+
+summary(m_early)
+```
+
+    ## 
+    ## Call:
+    ## lm(formula = PET_Gamma_divided_k2a_Session1_Accumbens ~ early_change + 
+    ##     Age + Gender, data = df_plot)
+    ## 
+    ## Residuals:
+    ##      Min       1Q   Median       3Q      Max 
+    ## -0.48412 -0.18477 -0.02411  0.19463  0.56117 
+    ## 
+    ## Coefficients:
+    ##                Estimate Std. Error t value Pr(>|t|)  
+    ## (Intercept)  -0.0276701  0.1209537  -0.229   0.8200  
+    ## early_change  0.0717999  0.0280469   2.560   0.0137 *
+    ## Age          -0.0004159  0.0039517  -0.105   0.9166  
+    ## Gendermale    0.1053180  0.0724234   1.454   0.1524  
+    ## ---
+    ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+    ## 
+    ## Residual standard error: 0.256 on 48 degrees of freedom
+    ##   (5 observations deleted due to missingness)
+    ## Multiple R-squared:  0.1548, Adjusted R-squared:  0.102 
+    ## F-statistic:  2.93 on 3 and 48 DF,  p-value: 0.04293
+
+``` r
+summary(m_late)
+```
+
+    ## 
+    ## Call:
+    ## lm(formula = PET_Gamma_divided_k2a_Session1_Accumbens ~ later_change + 
+    ##     Age + Gender, data = df_plot)
+    ## 
+    ## Residuals:
+    ##      Min       1Q   Median       3Q      Max 
+    ## -0.53858 -0.19110 -0.02708  0.20232  0.48829 
+    ## 
+    ## Coefficients:
+    ##                Estimate Std. Error t value Pr(>|t|)  
+    ## (Intercept)  -0.0146847  0.1226000  -0.120   0.9052  
+    ## later_change  0.0568375  0.0253279   2.244   0.0295 *
+    ## Age          -0.0001578  0.0040156  -0.039   0.9688  
+    ## Gendermale    0.0681842  0.0752163   0.907   0.3692  
+    ## ---
+    ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+    ## 
+    ## Residual standard error: 0.2597 on 48 degrees of freedom
+    ##   (5 observations deleted due to missingness)
+    ## Multiple R-squared:  0.1306, Adjusted R-squared:  0.07626 
+    ## F-statistic: 2.404 on 3 and 48 DF,  p-value: 0.07903
+
+``` r
+write.csv(broom::tidy(m_early), "outputs/lm_pet_early_change_tidy.csv", row.names = FALSE)
+write.csv(broom::tidy(m_late),  "outputs/lm_pet_later_change_tidy.csv", row.names = FALSE)
+```
+
+### 11c. Scatterplots: PET vs early/later change
+
+``` r
+p_scatter_early <- ggplot(
+  df_plot,
+  aes(x = early_change,
+      y = PET_Gamma_divided_k2a_Session1_Accumbens,
+      color = Group)
+) +
+  geom_point(size = 2.5, alpha = 0.8) +
+  geom_smooth(method = "lm", color = "black", se = TRUE, linewidth = 1.2) +
+  scale_color_manual(values = c("#440154FF", "#22A884FF", "#D55E00"), name = "Group") + 
+  labs(
+    x = "Early change (Block2 − Block1)\nOutcome-to-cue Δ NAcc beta weights",
+    y = "PET γ/k2a in NAcc"
+  ) +
+  theme_minimal(base_size = 16) +
+  theme(
+    axis.title = element_text(size = 16),
+    axis.text  = element_text(size = 14),
+    legend.position = "bottom",
+    legend.title = element_text(size = 14),
+    legend.text  = element_text(size = 13)
+  )
+
+p_scatter_early
+```
+
+![](figs/unnamed-chunk-16-1.png)<!-- -->
+
+``` r
+ggsave("figs/pet_scatter_early_change.png", p_scatter_early, width = 8, height = 6, dpi = 300)
+
+p_scatter_late <- ggplot(
+  df_plot,
+  aes(x = later_change,
+      y = PET_Gamma_divided_k2a_Session1_Accumbens,
+      color = Group)
+) +
+  geom_point(size = 2.5, alpha = 0.8) +
+  geom_smooth(method = "lm", color = "black", se = TRUE, linewidth = 1.2) +
+  scale_color_manual(values = c("#440154FF", "#22A884FF", "#D55E00"), name = "Group") + 
+  labs(
+    x = "Later change (Block4 − Block3)\nOutcome-to-cue Δ NAcc beta weights",
+    y = "PET γ/k2a in NAcc"
+  ) +
+  theme_minimal(base_size = 16) +
+  theme(
+    axis.title = element_text(size = 16),
+    axis.text  = element_text(size = 14),
+    legend.position = "bottom",
+    legend.title = element_text(size = 14),
+    legend.text  = element_text(size = 13)
+  )
+
+p_scatter_late
+```
+
+![](figs/unnamed-chunk-16-2.png)<!-- -->
+
+``` r
+ggsave("figs/pet_scatter_later_change.png", p_scatter_late, width = 8, height = 6, dpi = 300)
+```
+
+## 12. Save outputs
 
 ``` r
 write.csv(df_with_clusters, "outputs/cluster_assignments_final.csv", row.names = FALSE)
