@@ -505,7 +505,6 @@ run_block_model <- function(data, predictor) {
   )
 }
 
-# ---- Build dataset ----
 dat <- df_with_clusters[, c("ID", "cluster")] %>%
   cbind(features_scaled)
 
@@ -518,14 +517,12 @@ dat$cluster <- factor(dat$cluster,
                       levels = c(1, 2, 3),
                       labels = c("C1", "C2", "C3"))
 
-# ---- Run models ----
 predictors <- c("Block1","Block2","Block3","Block4",
                 "Early","Later","Overall","Ortho")
 
 results <- lapply(predictors, function(p) run_block_model(dat, p))
 names(results) <- predictors
 
-# ---- Summary ----
 summary_df <- data.frame(
   Predictor = predictors,
   Accuracy  = sapply(results, `[[`, "accuracy"),
@@ -535,48 +532,271 @@ summary_df <- data.frame(
 print(summary_df)
 
 write.csv(summary_df, "outputs/cluster_predictability_summary.csv", row.names = FALSE)
+```
 
-## 14. Apply clustering model to NEW dataset
+## 14. Apply clustering model to the independent MDD-HC dataset
 
 ```{r}
-# Load new dataset
 df_new <- read.csv("data/tabulated_data_secondary.csv")
 
-# ---- Preprocess exactly as you did ----
-roi_cols <- colnames(df_new[,c(3:6)])
+stopifnot(all(c("CUE_Accumbens_Reward", "CUE_Accumbens_Neutral",
+                "FEED_Accumbens_Reward", "FEED_Accumbens_Neutral",
+                "diagnosis", "treatment") %in% names(df_new)))
+
+roi_cols_new <- colnames(df_new[, c(3:6)])
 
 df_new_wins <- df_new %>%
   group_by(diagnosis, treatment) %>%
-  mutate(across(all_of(roi_cols), winsorize_iqr)) %>%
+  mutate(across(all_of(roi_cols_new), winsorize_iqr)) %>%
   ungroup()
 
 df_new_wins <- df_new_wins %>%
   mutate(
-    CUE_Accumbens  = CUE_Accumbens_Reward  - CUE_Accumbens_Neutral,
-    FEED_Accumbens = FEED_Accumbens_Reward - FEED_Accumbens_Neutral,
+    CUE_Accumbens   = CUE_Accumbens_Reward  - CUE_Accumbens_Neutral,
+    FEED_Accumbens  = FEED_Accumbens_Reward  - FEED_Accumbens_Neutral,
     SHIFT_Accumbens = CUE_Accumbens - FEED_Accumbens
   )
 
-# ---- Use BEST predictor ----
-best_predictor <- "Block4"  
+glimpse(df_new_wins)
+```
+
+## 14a. Train final model and apply to new data
+
+```{r}
+best_predictor <- "Block4"
 
 # Train final model on full original data
 train_data <- dat %>%
-  select(cluster, Block4) %>%
+  select(cluster, all_of(best_predictor)) %>%
   na.omit()
 
-model_final <- multinom(cluster ~ Block4, data = train_data, trace = FALSE)
+model_final <- multinom(cluster ~ .,
+                        data  = train_data,
+                        trace = FALSE)
 
-# ---- Apply to new data ----
 pred_probs <- predict(model_final,
                       newdata = data.frame(Block4 = df_new_wins$SHIFT_Accumbens),
-                      type = "probs")
+                      type    = "probs")
 
-pred_class <- colnames(pred_probs)[max.col(pred_probs)]
+df_new_wins$cluster_pred <- colnames(pred_probs)[max.col(pred_probs)]
 
-df_new_wins$cluster_pred <- pred_class
-
-# ---- Save ----
 write.csv(df_new_wins,
           "outputs/new_dataset_with_predicted_clusters.csv",
           row.names = FALSE)
+```
+
+## 14b. ANCOVA: SHIFT_Accumbens ~ diagnosis × treatment
+
+```{r}
+model_new <- lm(SHIFT_Accumbens ~ diagnosis * treatment + age + gender,
+                data = df_new_wins)
+anova(model_new)
+
+emm_new   <- emmeans(model_new, ~ diagnosis * treatment)
+pairs_new <- pairs(emm_new, adjust = "none")
+summary(pairs_new)
+```
+
+## 14c. Violin plot: SHIFT_Accumbens by treatment and diagnosis
+
+```{r}
+p_new_violin <- ggplot(df_new_wins,
+                       aes(x = treatment, y = SHIFT_Accumbens, fill = treatment)) +
+  geom_violin(trim = FALSE, alpha = 0.4, color = NA) +
+  geom_boxplot(width = 0.18, outlier.shape = NA, alpha = 0.8) +
+  geom_jitter(width = 0.08, alpha = 0.35, size = 1.4) +
+  scale_fill_manual(values = c("#22A884FF", "#440154FF")) +
+  facet_wrap(~ diagnosis, ncol = 4) +
+  labs(
+    x = "Treatment arm",
+    y = "Reward-to-cue shift\nNAcc BOLD beta weights"
+  ) +
+  theme_minimal(base_size = 16) +
+  theme(
+    plot.title      = element_text(size = 20, face = "bold"),
+    axis.title      = element_text(size = 16),
+    axis.text       = element_text(size = 14),
+    legend.position = "none"
+  )
+
+p_new_violin
+ggsave("figs/new_dataset_violin_shift.png", p_new_violin, width = 10, height = 5, dpi = 300)
+```
+
+## 14d. Predicted group distribution by diagnosis and treatment
+
+```{r}
+df_new_wins <- df_new_wins %>%
+  mutate(predicted = ifelse(cluster_pred == "C1", "Group 1", "Group 2"))
+
+p_pred_bar <- ggplot(df_new_wins, aes(x = predicted, fill = diagnosis)) +
+  geom_bar(position = "fill") +
+  scale_fill_brewer(palette = "Set1") +
+  facet_wrap(~ treatment) +
+  labs(
+    x    = "Predicted Group",
+    y    = "Proportion",
+    fill = "Diagnosis"
+  ) +
+  theme_minimal(base_size = 16) +
+  theme(
+    axis.title   = element_text(size = 16),
+    axis.text    = element_text(size = 14),
+    legend.title = element_text(size = 14),
+    legend.text  = element_text(size = 13)
+  )
+
+p_pred_bar
+ggsave("figs/new_dataset_predicted_group_by_diagnosis.png", p_pred_bar,
+       width = 8, height = 5, dpi = 300)
+```
+
+## 14e. Fisher's Exact Tests and OR homogeneity (Woolf's test)
+
+```{r}
+se_logOR <- function(tbl) {
+  a <- tbl[1, 1]; b <- tbl[1, 2]
+  c <- tbl[2, 1]; d <- tbl[2, 2]
+  sqrt(1/a + 1/b + 1/c + 1/d)
+}
+
+# Contingency tables by treatment arm 
+matrix_a <- table(
+  df_new_wins$cluster_pred[df_new_wins$treatment == "a"],
+  df_new_wins$diagnosis[df_new_wins$treatment == "a"]
+)
+matrix_p <- table(
+  df_new_wins$cluster_pred[df_new_wins$treatment == "p"],
+  df_new_wins$diagnosis[df_new_wins$treatment == "p"]
+)
+
+# Fisher's Exact Tests
+fisher_a <- fisher.test(matrix_a, alternative = "two.sided",
+                        conf.int = TRUE, conf.level = 0.95)
+fisher_p <- fisher.test(matrix_p, alternative = "two.sided",
+                        conf.int = TRUE, conf.level = 0.95)
+
+SE_a <- se_logOR(matrix_a)
+SE_p <- se_logOR(matrix_p)
+
+# Z-test comparing ORs across arms
+Z_stat  <- (log(fisher_a$estimate) - log(fisher_p$estimate)) / sqrt(SE_a^2 + SE_p^2)
+p_value <- 2 * pnorm(-abs(Z_stat))
+
+cat("Z statistic     :", round(Z_stat, 4), "\n")
+cat("Two-tailed p    :", round(p_value, 4), "\n")
+
+# Woolf's homogeneity of ORs test
+log_OR_homogeneity_test <- function(tables_list) {
+  log_ors <- c()
+  weights  <- c()
+
+  for (tbl in tables_list) {
+    a <- tbl[1, 1]; b <- tbl[1, 2]
+    c <- tbl[2, 1]; d <- tbl[2, 2]
+
+    # Add 0.5 correction if any cell is zero
+    if (any(c(a, b, c, d) == 0)) {
+      a <- a + 0.5; b <- b + 0.5; c <- c + 0.5; d <- d + 0.5
+    }
+
+    log_or     <- log((a * d) / (b * c))
+    var_log_or <- 1/a + 1/b + 1/c + 1/d
+
+    log_ors <- c(log_ors, log_or)
+    weights  <- c(weights, 1 / var_log_or)
+  }
+
+  pooled_log_or <- sum(weights * log_ors) / sum(weights)
+  Q             <- sum(weights * (log_ors - pooled_log_or)^2)
+  df_test       <- length(tables_list) - 1
+  p_homogeneity <- pchisq(Q, df = df_test, lower.tail = FALSE)
+
+  cat("\n=== Homogeneity of ORs Test (Woolf's Test) ===")
+  cat("\n  Stratum log(OR)s     :", round(log_ors, 4))
+  cat("\n  Pooled log(OR)       :", round(pooled_log_or, 4))
+  cat("\n  Pooled OR            :", round(exp(pooled_log_or), 4))
+  cat("\n  Q statistic          :", round(Q, 4))
+  cat("\n  Degrees of freedom   :", df_test)
+  cat("\n  P-value (homogeneity):", round(p_homogeneity, 4))
+
+  if (p_homogeneity < 0.05) {
+    cat("\n  Result: ** ORs are NOT homogeneous ** across strata (effect modification present)")
+  } else {
+    cat("\n  Result: ORs are homogeneous across strata (CMH pooled OR is valid)")
+  }
+  cat("\n===============================================\n")
+}
+
+log_OR_homogeneity_test(list(matrix_a, matrix_p))
+```
+
+## 14f. Forest plot of ORs by treatment arm
+
+```{r}
+forest_data <- data.frame(
+  Stratum     = c("a", "p"),
+  OR          = c(fisher_a$estimate,    fisher_p$estimate),
+  lower       = c(fisher_a$conf.int[1], fisher_p$conf.int[1]),
+  upper       = c(fisher_a$conf.int[2], fisher_p$conf.int[2]),
+  pval        = c(fisher_a$p.value,     fisher_p$p.value),
+  significant = c(fisher_a$p.value < 0.05, fisher_p$p.value < 0.05)
+) %>%
+  mutate(
+    or_label = sprintf("OR = %.2f [%.2f\u2013%.2f]\np = %.3f", OR, lower, upper, pval),
+    Stratum  = factor(Stratum, levels = c("a", "p"))
+  )
+
+p_forest <- ggplot(forest_data, aes(x = OR, y = Stratum, color = significant)) +
+  geom_errorbarh(aes(xmin = lower, xmax = upper),
+                 height = 0.15, linewidth = 1.2) +
+  geom_point(aes(shape = significant), size = 5) +
+  geom_vline(xintercept = 1, linetype = "dashed",
+             color = "gray40", linewidth = 0.9) +
+  geom_text(aes(x = 9, label = or_label),
+            hjust = 0, size = 3.5, lineheight = 1.3) +
+  scale_color_manual(
+    values = c("TRUE"  = "#C0392B",
+               "FALSE" = "#2980B9"),
+    labels = c("TRUE"  = "p < 0.05",
+               "FALSE" = "p > 0.05"),
+    name   = "Significance"
+  ) +
+  scale_shape_manual(
+    values = c("TRUE" = 18, "FALSE" = 16),
+    guide  = "none"
+  ) +
+  scale_x_log10(
+    limits = c(0.005, 20),
+    breaks = c(0.01, 0.1, 0.5, 1, 2, 5),
+    labels = c("0.01", "0.1", "0.5", "1", "2", "5")
+  ) +
+  annotate("rect", xmin = 0.005, xmax = 1,
+           ymin = -Inf, ymax = Inf,
+           fill = "#E8DAEF", alpha = 0.25) +
+  annotate("text", x = 0.08, y = 0.4,
+           label = "MDD \u2192 C1\n(outcome-dominant)",
+           color = "gray30", size = 3, fontface = "italic") +
+  annotate("text", x = 3.5, y = 0.4,
+           label = "MDD \u2192 C2\n(cue-driven)",
+           color = "gray30", size = 3, fontface = "italic") +
+  labs(
+    x       = "Odds Ratio: Group 2 vs Group 1 (MDD relative to HC)  [log scale]",
+    y       = "Treatment Arm",
+    caption = paste0("OR < 1: MDD enriched in Group 1 relative to HC\n",
+                     "OR > 1: MDD enriched in Group 2 relative to HC\n",
+                     "Woolf's Homogeneity test: p = 0.011")
+  ) +
+  theme_bw(base_size = 13) +
+  theme(
+    panel.grid.minor   = element_blank(),
+    panel.grid.major.y = element_blank(),
+    legend.position    = "bottom",
+    plot.caption       = element_text(hjust = 0, size = 10, color = "gray40"),
+    plot.title         = element_text(face = "bold", size = 13),
+    axis.text.y        = element_text(size = 12, face = "bold")
+  )
+
+p_forest
+ggsave("figs/forest_plot_OR_by_treatment.png", p_forest, width = 10, height = 5, dpi = 300)
+```
