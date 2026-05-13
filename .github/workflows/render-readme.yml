@@ -39,6 +39,10 @@ jobs:
             any::cluster
             any::fpc
             any::factoextra
+            any::caret
+            any::nnet
+            any::MLmetrics
+            any::pROC
 
       - name: Render to README.md
         run: |
