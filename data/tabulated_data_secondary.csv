@@ -1,4 +1,4 @@
-,ID,CUE_Accumbens_Reward,CUE_Accumbens_Neutral,FEED_Accumbens_Reward,FEED_Accumbens_Neutral,diagnosis,treatment,gender,age,group
+,ID,CUE_Accumbens_Reward,CUE_Accumbens_Neutral,FEED_Accumbens_Reward,FEED_Accumbens_Neutral,diagnosis,treatment,sex,age,group
 1,1,0.674717063,0.524431416,0.103172917,-0.42709145,HC,p,0,23,HC_p
 2,2,-0.720382982,-0.928478635,1.796544327,-0.550559896,HC,p,0,22,HC_p
 3,3,0.465637208,1.062029986,-1.334713482,-0.52325991,HC,p,0,39,HC_p
