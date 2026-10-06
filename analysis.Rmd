@@ -289,7 +289,7 @@ p_trajectories <- ggplot(df_diff_roi_clustered,
   scale_color_manual(values = c("#440154FF", "#22A884FF", "#D55E00"), name = "Group") +
   scale_fill_manual(values = c("#440154FF", "#22A884FF", "#D55E00"), guide = "none") +
   
-  labs(title = "Consensus Clustering Solution applied to Large > Small Reward Contrast",
+  labs(title = "Consensus Clustering Solution applied to Large > Neutral Reward Contrast",
        subtitle = paste("K =", K_FINAL, "| Thick line = mean ± SE"),
        x = "Block", 
        y = "Reward-to-cue Shift \nNAcc BOLD beta weights") +
