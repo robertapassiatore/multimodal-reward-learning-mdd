@@ -424,7 +424,7 @@ cat("Independent sample N =", n_distinct(df_secondary$ID), "\n")
 
 ```{r secondary-ancova}
 secondary_model <- lm(
-  shift ~ diagnosis * treatment + age + Sex,
+  shift ~ diagnosis * treatment + age + sex,
   data = df_secondary
 )
 
