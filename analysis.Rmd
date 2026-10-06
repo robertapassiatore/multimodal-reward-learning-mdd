@@ -523,7 +523,7 @@ write_csv(
 
 write_csv(
   df_secondary %>%
-    select(ID, diagnosis, treatment, Sex, age, cue_contrast, outcome_contrast, shift),
+    select(ID, diagnosis, treatment, sex, age, cue_contrast, outcome_contrast, shift),
   "outputs/secondary_reward_to_cue.csv"
 )
 ```
