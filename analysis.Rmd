@@ -1,9 +1,12 @@
 ---
-title: "Multimodal Reward Learning in MDD patients "
+title: "Individual differences in reward learning reveal dopaminergic value-updating profiles linked to anhedonia and case-control differences in major depressive disorder"
 output:
   github_document:
     toc: true
     toc_depth: 2
+    fig_width: 8
+    fig_height: 5
+always_allow_html: true
 ---
 
 ```{r setup, include=FALSE}
@@ -17,63 +20,80 @@ knitr::opts_chunk$set(
   dpi = 300
 )
 dir.create("figs", showWarnings = FALSE)
+dir.create("figures", showWarnings = FALSE)
 dir.create("outputs", showWarnings = FALSE)
 ```
 
-## What this is
+# Overview
 
-This README is auto-generated from `analysis.Rmd` by GitHub Actions.
-It loads **repo-local** data from `data/tabulated_data.csv` and runs preprocessing + clustering.
+This repository contains the reproducible analysis workflow supporting the manuscript **“Individual differences in reward learning reveal dopaminergic value-updating profiles linked to anhedonia and case-control differences in major depressive disorder.”** The workflow reconstructs the primary NAcc reward-to-cue measure, tests interindividual heterogeneity, performs consensus clustering, evaluates cluster stability, examines dopaminergic associations, and applies the reward-learning phenotype to an independent pharmacological MDD–HC sample.
 
-## Packages
+The statistical analyses below use the repository-local tabulated datasets. Final manuscript figures are reproduced from the deposited `Source Data.xlsx` workbook using `plot_figures_from_source.R` and `plot_figures_from_source.py`.
 
-```{r}
+# Requirements
+
+```{r packages}
+required_packages <- c(
+  "readr", "readxl", "dplyr", "tidyr", "ggplot2", "stringr", "tibble",
+  "lme4", "lmerTest", "emmeans", "broom", "ConsensusClusterPlus",
+  "cluster", "mclust", "patchwork", "ggdendro", "ggnewscale"
+)
+
+invisible(lapply(required_packages, function(pkg) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    stop("Required package not installed: ", pkg)
+  }
+}))
+
 library(readr)
+library(readxl)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
-library(viridis)
-library(broom)
 library(stringr)
-library(purrr)
+library(tibble)
+library(lme4)
+library(lmerTest)
+library(emmeans)
+library(broom)
+library(ConsensusClusterPlus)
+library(cluster)
 library(mclust)
 library(patchwork)
-library(lmerTest)
-library(lme4)
-library(emmeans)
-
-# clustering + validation + plotting helpers
-library(ConsensusClusterPlus)
-library(cluster)       # silhouette()
-library(fpc)           # cluster.stats() 
-library(factoextra)    # fviz_silhouette()
 ```
+
+# Primary MDD sample
 
 ## 1. Load data
 
-```{r}
-data_path <- "data/tabulated_data.csv"
+```{r load-primary}
+primary_file <- "data/tabulated_data.csv"
+stopifnot(file.exists(primary_file))
 
-stopifnot(file.exists(data_path))
+df <- read_csv(primary_file, show_col_types = FALSE) %>%
+  select(-any_of("Unnamed: 0")) %>%
+  mutate(
+    ID = as.character(ID)
+  )
 
-df <- readr::read_csv(data_path, show_col_types = FALSE) %>%
-  mutate(ID = as.character(ID))
-
-# quick check
-dplyr::glimpse(df)
+cat("Primary sample N =", n_distinct(df$ID), "\n")
 ```
 
-## 2. Select ROI BOLD columns (Cue + Feedback × blocks)
+The primary dataset contains the bilateral nucleus accumbens (NAcc) beta estimates used to derive the reward-to-cue shift, together with demographic and PET variables.
 
-```{r}
+## 2. Preprocess NAcc beta estimates
+
+Condition-specific NAcc beta estimates are winsorized using a 1.5 × IQR rule and mean-centered across participants before contrasts are calculated.
+
+```{r preprocess-primary}
 df_roi <- df %>%
   select(
-    ID, Gender, Age, Placebo1_Med0,
-    matches("(Accumbens)_(small|medium|large|neutral)_(cue|FB)_block\\d+")
+    ID, Sex, Age, Placebo1_Med0,
+    matches("Accumbens_(small|medium|large|neutral)_(cue|FB)_block\\d+")
   ) %>%
   select(-matches("Session"))
 
-id_vars <- c("ID", "Gender", "Age", "Placebo1_Med0")
+id_vars <- c("ID", "Sex", "Age", "Placebo1_Med0")
 roi_cols <- setdiff(names(df_roi), id_vars)
 
 winsorize_iqr <- function(x) {
@@ -82,9 +102,7 @@ winsorize_iqr <- function(x) {
   iqr <- q3 - q1
   lower <- q1 - 1.5 * iqr
   upper <- q3 + 1.5 * iqr
-  x[x < lower] <- lower
-  x[x > upper] <- upper
-  x
+  pmin(pmax(x, lower), upper)
 }
 
 df_roi_wins <- df_roi %>%
@@ -92,711 +110,427 @@ df_roi_wins <- df_roi %>%
   mutate(across(all_of(roi_cols), ~ .x - mean(.x, na.rm = TRUE)))
 ```
 
-## 3. Long format & label phase, reward, block, ROI
+## 3. Compute reward contrasts and reward-to-cue shift
 
-```{r}
+For each learning block, reward-related activity is defined as reward minus neutral separately during cue and outcome processing. The primary measure is the **Large Reward > Neutral reward-to-cue shift**, calculated as cue-related minus outcome-related NAcc activity. Positive values therefore indicate relatively greater cue-related representation, whereas negative values indicate relatively greater reward-outcome representation.
+
+```{r derive-shift}
 df_long <- df_roi_wins %>%
   pivot_longer(
-    cols = -c(ID, Gender, Age, Placebo1_Med0),
-    names_to = "tmp",
+    cols = all_of(roi_cols),
+    names_to = "variable",
     values_to = "BOLD"
   ) %>%
   mutate(
-    Reward = str_extract(tmp, "(small|medium|large|neutral)"),
-    Block  = str_extract(tmp, "(?<=block)\\d+"),
-    Phase  = case_when(
-      str_detect(tmp, "_cue_") ~ "CUE",
-      str_detect(tmp, "_FB_")  ~ "FEED",
-      TRUE ~ NA_character_
-    ),
-    ROI = case_when(
-      str_detect(tmp, "Accumbens") ~ "Accumbens",
+    Reward = str_extract(variable, "(small|medium|large|neutral)"),
+    Block = as.integer(str_extract(variable, "(?<=block)\\d+")),
+    Phase = case_when(
+      str_detect(variable, "_cue_") ~ "CUE",
+      str_detect(variable, "_FB_")  ~ "OUTCOME",
       TRUE ~ NA_character_
     )
   ) %>%
-  select(ID, Gender, Age, Placebo1_Med0, Reward, Block, ROI, Phase, BOLD)
-```
+  select(ID, Sex, Age, Placebo1_Med0, Reward, Block, Phase, BOLD)
 
-## 4. Compute reward modulation (Large/Medium/Small − Neutral)
-
-```{r}
 df_diff <- df_long %>%
-  group_by(ID, Block, ROI, Phase, Placebo1_Med0) %>%
+  group_by(ID, Sex, Age, Placebo1_Med0, Block, Phase) %>%
   summarise(
-    BOLD_Large_vs_Neutral  = BOLD[Reward == "large"][1]  - BOLD[Reward == "neutral"][1],
-    BOLD_Medium_vs_Neutral = BOLD[Reward == "medium"][1] - BOLD[Reward == "neutral"][1],
-    BOLD_Small_vs_Neutral  = BOLD[Reward == "small"][1]  - BOLD[Reward == "neutral"][1],
+    large_vs_neutral  = BOLD[Reward == "large"][1]  - BOLD[Reward == "neutral"][1],
+    medium_vs_neutral = BOLD[Reward == "medium"][1] - BOLD[Reward == "neutral"][1],
+    small_vs_neutral  = BOLD[Reward == "small"][1]  - BOLD[Reward == "neutral"][1],
     .groups = "drop"
+  )
+
+df_diff_phases <- df_diff %>%
+  pivot_wider(
+    names_from = Phase,
+    values_from = c(large_vs_neutral, medium_vs_neutral, small_vs_neutral)
   ) %>%
-  left_join(df_long %>% distinct(ID, Age, Gender), by = "ID") %>%
-  select(
-    ID, Gender, Age, Placebo1_Med0, Block, ROI, Phase,
-    BOLD_Large_vs_Neutral, BOLD_Medium_vs_Neutral, BOLD_Small_vs_Neutral
-  )
-```
-
-## 5. Build SHIFT (CUE − FEED) for Large-Neutral Contrast
-
-```{r}
-df_indv <- df_diff
-
-df_diff_phases <- df_indv %>%
-  select(ID, ROI, Block, Phase, BOLD_Large_vs_Neutral) %>%
-  pivot_wider(names_from = Phase, values_from = BOLD_Large_vs_Neutral) %>%
-  mutate(SHIFT = CUE - FEED)
-
-df_diff_roi <- df_diff_phases %>%
-  pivot_wider(names_from = ROI, values_from = c(CUE, FEED, SHIFT)) %>%
-  mutate(subject = as.character(as.numeric(as.factor(ID)))) %>%
-  left_join(df %>% mutate(subject = as.character(as.numeric(as.factor(ID)))) %>% select(subject, Age, Gender),
-            by = "subject") %>%
   mutate(
-    Block = as.numeric(as.character(Block)),
-    subj  = factor(as.numeric(as.factor(ID)))
+    shift = large_vs_neutral_CUE - large_vs_neutral_OUTCOME,
+    medium_shift = medium_vs_neutral_CUE - medium_vs_neutral_OUTCOME,
+    small_shift = small_vs_neutral_CUE - small_vs_neutral_OUTCOME,
+    subject = factor(ID)
   )
 
-stopifnot("SHIFT_Accumbens" %in% names(df_diff_roi))
+stopifnot(nrow(df_diff_phases) == 4 * n_distinct(df_diff_phases$ID))
 ```
 
-## 6. Feature matrix for clustering (SHIFT_Accumbens across blocks)
+## 4. Test interindividual heterogeneity
 
-```{r}
-features <- cbind(
-  Block1 = df_diff_roi$SHIFT_Accumbens[df_diff_roi$Block == 1],
-  Block2 = df_diff_roi$SHIFT_Accumbens[df_diff_roi$Block == 2],
-  Block3 = df_diff_roi$SHIFT_Accumbens[df_diff_roi$Block == 3],
-  Block4 = df_diff_roi$SHIFT_Accumbens[df_diff_roi$Block == 4]
+Before clustering, a random-intercept model is compared with a model allowing participant-specific slopes across learning blocks. Models are estimated by maximum likelihood for the likelihood-ratio comparison.
+
+```{r heterogeneity}
+m_random_intercept <- lmer(
+  shift ~ Block + Age + Sex + (1 | ID),
+  data = df_diff_phases,
+  REML = FALSE
 )
 
-subject_ids <- unique(df_diff_roi$ID)
-features_scaled <- as.data.frame(scale(features))
-rownames(features_scaled) <- subject_ids
-features_scaled <- features_scaled[complete.cases(features_scaled), , drop = FALSE]
+m_random_slope <- lmer(
+  shift ~ Block + Age + Sex + (Block | ID),
+  data = df_diff_phases,
+  REML = FALSE
+)
+
+anova(m_random_intercept, m_random_slope)
+VarCorr(m_random_slope)
+
+random_effects <- ranef(m_random_slope)$ID %>%
+  rownames_to_column("ID") %>%
+  rename(
+    random_intercept = `(Intercept)`,
+    random_slope = Block
+  )
+
+fixed_effects <- fixef(m_random_slope)
+
+subject_slopes <- random_effects %>%
+  transmute(
+    ID,
+    subject_intercept = unname(fixed_effects["(Intercept)"]) + random_intercept,
+    subject_slope = unname(fixed_effects["Block"]) + random_slope
+  )
+
+write_csv(subject_slopes, "outputs/subject_specific_slopes.csv")
 ```
 
-## 7. Consensus clustering
+## 5. Consensus clustering of reward-learning trajectories
 
-```{r}
+Clustering uses each participant's four-block Large Reward > Neutral reward-to-cue trajectory. Features are standardized across participants. ConsensusClusterPlus is run with hierarchical clustering, average linkage, Pearson distance, 500 resamples, and a fixed random seed. The final solution uses **K = 3**.
+
+```{r consensus-clustering}
+features_df <- df_diff_phases %>%
+  select(ID, Block, shift) %>%
+  pivot_wider(names_from = Block, values_from = shift, names_prefix = "Block") %>%
+  arrange(ID) %>%
+  filter(if_all(starts_with("Block"), ~ !is.na(.x)))
+
+subject_ids <- features_df$ID
+features <- features_df %>%
+  select(Block1, Block2, Block3, Block4) %>%
+  as.data.frame()
+rownames(features) <- subject_ids
+
+features_scaled <- as.data.frame(scale(features))
+
 set.seed(234)
 cons_results <- ConsensusClusterPlus(
-  t(features_scaled),     # features x samples
+  t(as.matrix(features_scaled)),
   maxK = 6,
-  reps = 200,             # keep Actions reasonably fast
+  reps = 500,
   seed = 234,
-  plot = "png",
-  title = "figs/Consensus_Clustering",
+  clusterAlg = "hc",
+  innerLinkage = "average",
+  finalLinkage = "average",
+  distance = "pearson",
+  plot = NULL,
   writeTable = FALSE
 )
 
 K_FINAL <- 3
 final_clusters <- cons_results[[K_FINAL]]$consensusClass
+names(final_clusters) <- rownames(features_scaled)
 
-df_with_clusters <- df_diff_roi %>%
-  distinct(ID, Age, Gender) %>%
-  mutate(cluster = final_clusters[match(ID, rownames(features_scaled))])
+table(final_clusters)
 
-df_diff_roi_clustered <- df_diff_roi %>%
-  left_join(df_with_clusters %>% select(ID, cluster), by = "ID") %>%
-  mutate(
-    Block = factor(Block),
-    cluster = factor(cluster)
-  )
-```
-
-## 8. Mixed model
-
-```{r}
-fit <- lmer(SHIFT_Accumbens ~ cluster * Block + Age + Gender + (1|subject),
-            data = df_diff_roi_clustered)
-anova(fit)
-# Estimated marginal means
-emm <- emmeans(fit, ~ cluster * Block)
-pairs(emmeans(fit, ~ cluster | Block))
-
-```
-
-## 9. Validation metrics + silhouette plot
-
-```{r}
-final_sil <- silhouette(as.integer(final_clusters), dist(features_scaled))
-final_avg_sil <- mean(final_sil[, 3])
-
-final_avg_sil
-
-sil_plot <- fviz_silhouette(final_sil) +
-  scale_fill_manual(values = c("#440154FF", "#22A884FF", "#D55E00"), name = "Group") +
-  scale_color_manual(values = c("lightpink", "lightcyan", "orange"), name = "Group") +
-  labs(title = paste("Silhouette Plot for K =", K_FINAL),
-       subtitle = paste("Average Silhouette Width =", round(final_avg_sil, 3)))
-
-sil_plot
-ggsave("figs/silhouette_plot_final.png", sil_plot, width = 10, height = 6)
-```
-
-## 10. Trajectories plot
-
-```{r}
-df_diff_roi_clustered$Group <- df_diff_roi_clustered$cluster
-# Compute cluster sizes (needed for facet labels)
-cluster_sizes <- df_diff_roi_clustered %>%
-  dplyr::distinct(ID, Group) %>%
-  dplyr::count(Group, name = "n")
-
-labeller_vec <- setNames(
-  paste0("Group ", cluster_sizes$Group, "\n(n = ", cluster_sizes$n, ")"),
-  cluster_sizes$Group
+cluster_assignments <- tibble(
+  ID = names(final_clusters),
+  cluster = factor(as.integer(final_clusters), levels = 1:3)
 )
-y_max <- max(df_diff_roi_clustered$SHIFT_Accumbens, na.rm = TRUE)
-y_min <- min(df_diff_roi_clustered$SHIFT_Accumbens, na.rm = TRUE)
-p_trajectories <- ggplot(df_diff_roi_clustered, 
-                         aes(x = as.numeric(Block), 
-                             y = SHIFT_Accumbens,
-                             group = ID, 
-                             color = factor(Group))) +
-  
-  # background bands
-  geom_rect(aes(xmin = -Inf, xmax = Inf, ymin = 0, ymax = Inf),
-            inherit.aes = FALSE,
-            fill = "lightblue",
-            alpha = 0.03) +
-  geom_rect(aes(xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = 0),
-            inherit.aes = FALSE,
-            fill = "mistyrose",
-            alpha = 0.03) +
-  
-  # zero line
-  geom_hline(yintercept = 0, linetype = "dashed", color = "black", linewidth = 0.7) +
-  
-  # individual trajectories
-  geom_line(alpha = 0.3, linewidth = 0.6) +
-  
-  # mean ± SE ribbon
-  stat_summary(aes(group = Group, fill = factor(Group)), 
-               fun.data = mean_se, 
-               geom = "ribbon",
-               alpha = 0.20, 
-               color = NA) +
-  
-  # mean trajectory
-  stat_summary(aes(group = Group), 
-               fun = mean, 
-               geom = "line", 
-               linewidth = 2.2) +
-  
-  facet_wrap(~Group, 
-             labeller = as_labeller(labeller_vec)) +
-  
-  scale_color_manual(values = c("#440154FF", "#22A884FF", "#D55E00"), name = "Group") +
-  scale_fill_manual(values = c("#440154FF", "#22A884FF", "#D55E00"), guide = "none") +
-  
-  labs(title = "Consensus Clustering Solution applied to Large > Neutral Reward Contrast",
-       subtitle = paste("K =", K_FINAL, "| Thick line = mean ± SE"),
-       x = "Block", 
-       y = "Reward-to-cue Shift \nNAcc BOLD beta weights") +
-  
-  annotate("text", x = 4.15, y = y_max * 0.92, label = "Cue-driven value representations",
-           hjust = 1, size = 5, fontface = "bold") +
-  annotate("text", x = 4.15, y = y_min * 0.92, label = "Reward-driven value representations",
-           hjust = 1, size = 5, fontface = "bold") +
-  
-  theme_minimal(base_size = 16) +
-  theme(
-    plot.title = element_text(size = 20, face = "bold"),
-    plot.subtitle = element_text(size = 16),
-    strip.text = element_text(size = 16, face = "bold"),
-    axis.title = element_text(size = 16),
-    axis.text = element_text(size = 14),
-    legend.position = "bottom",
-    legend.title = element_text(size = 14),
-    legend.text = element_text(size = 13)
+
+write_csv(cluster_assignments, "outputs/cluster_assignments_final.csv")
+```
+
+## 6. Cluster-specific trajectories
+
+```{r cluster-lmm}
+df_clustered <- df_diff_phases %>%
+  inner_join(cluster_assignments, by = "ID") %>%
+  mutate(
+    Block_f = factor(Block),
+    cluster = factor(cluster, levels = 1:3)
   )
 
-p_trajectories
-ggsave("figs/trajectories_shift_accumbens.png", p_trajectories, width = 12, height = 5)
+model_cluster <- lmer(
+  shift ~ cluster * Block_f + Age + Sex + (1 | ID),
+  data = df_clustered
+)
+
+anova(model_cluster)
+summary(model_cluster)
+
+emm_cluster_block <- emmeans(model_cluster, ~ cluster | Block_f)
+pairs(emm_cluster_block, adjust = "none")
 ```
 
-## 11. Save outputs
+## 7. Cluster stability
 
-```{r}
-write.csv(df_with_clusters, "outputs/cluster_assignments_final.csv", row.names = FALSE)
+Silhouette width is calculated using Pearson-distance geometry, consistent with the clustering distance. Cluster stability is additionally evaluated by rerunning consensus clustering in bootstrap samples and comparing assignments with the original K = 3 solution using the Adjusted Rand Index (ARI).
 
-df_full_clustered <- df %>%
-  left_join(df_with_clusters %>% select(ID, cluster), by = "ID")
+```{r stability}
+pearson_dist <- as.dist(1 - cor(t(as.matrix(features_scaled)), method = "pearson"))
+final_sil <- silhouette(as.integer(final_clusters), pearson_dist)
 
-write.csv(df_full_clustered, "outputs/full_data_with_clusters_final.csv", row.names = FALSE)
+cat("Mean silhouette width:", mean(final_sil[, "sil_width"]), "\n")
+
+silhouette_source <- tibble(
+  ID = rownames(features_scaled),
+  cluster = as.integer(final_clusters),
+  silhouette_width = final_sil[, "sil_width"]
+)
+write_csv(silhouette_source, "outputs/silhouette_values.csv")
 ```
-## 11. PET analyses
 
-```{r}
-# Requires this column in data/tabulated_data.csv:
-stopifnot("PET_Gamma_divided_k2a_Session1_Accumbens" %in% names(df))
+The full 500 × 500 nested bootstrap procedure used for the manuscript is computationally intensive. The code below is disabled during routine README rendering but can be enabled for full reproduction.
 
-# Subject-level table derived from features_scaled (Block1..Block4)
-df_plot <- as.data.frame(features_scaled)
-df_plot$ID <- as.character(rownames(features_scaled))
+```{r bootstrap-stability, eval=FALSE}
+X <- as.data.frame(t(features_scaled))
+orig_class <- final_clusters
+B <- 500
+ari <- numeric(B)
 
-df_plot <- df_plot %>%
+set.seed(234)
+for (b in seq_len(B)) {
+  boot_cols <- sample(colnames(X), replace = TRUE)
+  Xb <- X[, boot_cols, drop = FALSE]
+
+  res_b <- ConsensusClusterPlus(
+    as.matrix(Xb),
+    maxK = 3,
+    reps = 500,
+    seed = b,
+    clusterAlg = "hc",
+    innerLinkage = "average",
+    finalLinkage = "average",
+    distance = "pearson",
+    plot = NULL,
+    writeTable = FALSE
+  )
+
+  boot_class <- res_b[[3]]$consensusClass
+  names(boot_class) <- colnames(Xb)
+  ari[b] <- adjustedRandIndex(orig_class[boot_cols], boot_class)
+}
+
+summary(ari)
+quantile(ari, c(.025, .50, .975))
+write_csv(tibble(iteration = seq_len(B), ARI = ari), "outputs/bootstrap_ARI.csv")
+```
+
+# Dopaminergic associations
+
+## 8. PET differences across reward-learning profiles
+
+The primary PET measure is NAcc `gamma/k2a` from the lp-ntPET model. Cluster differences are tested using ANCOVA with age and sex as covariates.
+
+```{r pet-cluster}
+df_subject <- df %>%
+  inner_join(cluster_assignments, by = "ID") %>%
+  mutate(cluster = factor(cluster, levels = 1:3))
+
+pet_model <- lm(
+  PET_Gamma_divided_k2a_Session1_Accumbens ~ cluster + Age + Sex,
+  data = df_subject
+)
+
+anova(pet_model)
+summary(pet_model)
+
+pet_emm <- emmeans(pet_model, ~ cluster)
+pairs(pet_emm, adjust = "fdr")
+```
+
+## 9. PET associations with reward-learning change
+
+Early change is defined as Block 2 − Block 1, later change as Block 4 − Block 3, and overall change as Block 4 − Block 1. Associations with PET `gamma/k2a` are adjusted for age and sex.
+
+```{r pet-change}
+trajectory_subject <- features_df %>%
   mutate(
     early_change = Block2 - Block1,
     later_change = Block4 - Block3,
-    all_change   = Block4 - Block1
+    overall_change = Block4 - Block1
   ) %>%
   left_join(
-    df %>% select(ID, PET_Gamma_divided_k2a_Session1_Accumbens, Age, Gender),
+    df %>% select(ID, Age, Sex, PET_Gamma_divided_k2a_Session1_Accumbens),
     by = "ID"
-  ) %>%
-  left_join(
-    df_with_clusters %>% select(ID, cluster),
-    by = "ID"
-  ) %>%
+  )
+
+m_pet_early <- lm(
+  PET_Gamma_divided_k2a_Session1_Accumbens ~ early_change + Age + Sex,
+  data = trajectory_subject
+)
+m_pet_later <- lm(
+  PET_Gamma_divided_k2a_Session1_Accumbens ~ later_change + Age + Sex,
+  data = trajectory_subject
+)
+m_pet_overall <- lm(
+  PET_Gamma_divided_k2a_Session1_Accumbens ~ overall_change + Age + Sex,
+  data = trajectory_subject
+)
+
+bind_rows(
+  tidy(m_pet_early) %>% mutate(model = "early_change"),
+  tidy(m_pet_later) %>% mutate(model = "later_change"),
+  tidy(m_pet_overall) %>% mutate(model = "overall_change")
+) %>%
+  write_csv("outputs/pet_change_models.csv")
+
+summary(m_pet_early)
+summary(m_pet_later)
+summary(m_pet_overall)
+```
+
+# Clinical associations
+
+## 10. Anhedonia and depressive symptoms
+
+Clinical variables used in the manuscript are reproduced in the deposited Source Data workbook and final figure script. They are not duplicated in `data/tabulated_data.csv`; therefore, the figure-reproduction workflow below is the authoritative repository path for the SHAPS and related manuscript panels.
+
+# Independent pharmacological MDD–HC sample
+
+## 11. Load and preprocess the independent sample
+
+```{r load-secondary}
+secondary_file <- "data/tabulated_data_secondary.csv"
+stopifnot(file.exists(secondary_file))
+
+df_secondary <- read_csv(secondary_file, show_col_types = FALSE) %>%
+  select(-any_of("Unnamed: 0")) %>%
   mutate(
-    Group  = factor(cluster),
-    Gender = factor(Gender)
+    ID = as.character(ID),
+    Sex = gender
   )
 
-glimpse(df_plot)
-```
+secondary_roi_cols <- c(
+  "CUE_Accumbens_Reward", "CUE_Accumbens_Neutral",
+  "FEED_Accumbens_Reward", "FEED_Accumbens_Neutral"
+)
 
-### 11a. PET violin by Group
-
-```{r}
-p_pet_violin <- ggplot(
-  df_plot,
-  aes(x = Group, y = PET_Gamma_divided_k2a_Session1_Accumbens, fill = Group)
-) +
-  geom_violin(trim = FALSE, alpha = 0.4, color = NA) +
-  geom_boxplot(width = 0.18, outlier.shape = NA, alpha = 0.8) +
-  geom_jitter(width = 0.08, alpha = 0.35, size = 1.4) +
-  scale_fill_manual(values = c("#440154FF", "#22A884FF", "#D55E00"), name = "Group") + 
-  labs(
-    x = "Group",
-    y = "PET γ/k2a in NAcc"
-  ) +
-  theme_minimal(base_size = 16) +
-  theme(
-    axis.title = element_text(size = 16),
-    axis.text  = element_text(size = 14),
-    legend.position = "bottom",
-    legend.title = element_text(size = 14),
-    legend.text  = element_text(size = 13)
+df_secondary <- df_secondary %>%
+  group_by(diagnosis, treatment) %>%
+  mutate(across(all_of(secondary_roi_cols), winsorize_iqr)) %>%
+  ungroup() %>%
+  mutate(
+    cue_contrast = CUE_Accumbens_Reward - CUE_Accumbens_Neutral,
+    outcome_contrast = FEED_Accumbens_Reward - FEED_Accumbens_Neutral,
+    shift = cue_contrast - outcome_contrast
   )
 
-p_pet_violin
-ggsave("figs/pet_violin_by_group.png", p_pet_violin, width = 8, height = 5, dpi = 300)
+cat("Independent sample N =", n_distinct(df_secondary$ID), "\n")
 ```
 
-### 11b. PET regressions with early/later change
+## 12. Diagnosis × treatment analysis
 
-```{r}
-m_early <- lm(PET_Gamma_divided_k2a_Session1_Accumbens ~ early_change + Age + Gender, data = df_plot)
-m_late  <- lm(PET_Gamma_divided_k2a_Session1_Accumbens ~ later_change + Age + Gender, data = df_plot)
+```{r secondary-ancova}
+secondary_model <- lm(
+  shift ~ diagnosis * treatment + age + Sex,
+  data = df_secondary
+)
 
-summary(m_early)
-summary(m_late)
+anova(secondary_model)
+summary(secondary_model)
 
-write.csv(broom::tidy(m_early), "outputs/lm_pet_early_change_tidy.csv", row.names = FALSE)
-write.csv(broom::tidy(m_late),  "outputs/lm_pet_later_change_tidy.csv", row.names = FALSE)
+secondary_emm <- emmeans(secondary_model, ~ diagnosis * treatment)
+pairs(secondary_emm, adjust = "none")
 ```
 
-### 11c. Scatterplots: PET vs early/later change
+## 13. Apply the primary reward-learning classifier
 
-```{r}
-p_scatter_early <- ggplot(
-  df_plot,
-  aes(x = early_change,
-      y = PET_Gamma_divided_k2a_Session1_Accumbens,
-      color = Group)
-) +
-  geom_point(size = 2.5, alpha = 0.8) +
-  geom_smooth(method = "lm", color = "black", se = TRUE, linewidth = 1.2) +
-  scale_color_manual(values = c("#440154FF", "#22A884FF", "#D55E00"), name = "Group") + 
-  labs(
-    x = "Early change (Block2 − Block1)\nOutcome-to-cue Δ NAcc beta weights",
-    y = "PET γ/k2a in NAcc"
-  ) +
-  theme_minimal(base_size = 16) +
-  theme(
-    axis.title = element_text(size = 16),
-    axis.text  = element_text(size = 14),
-    legend.position = "bottom",
-    legend.title = element_text(size = 14),
-    legend.text  = element_text(size = 13)
-  )
+Block 4 was the strongest single-block predictor of primary-sample cluster membership. The multinomial classifier used for the manuscript is fit to the primary sample and applied to the independent sample's reward-to-cue shift.
 
-p_scatter_early
-ggsave("figs/pet_scatter_early_change.png", p_scatter_early, width = 8, height = 6, dpi = 300)
-
-p_scatter_late <- ggplot(
-  df_plot,
-  aes(x = later_change,
-      y = PET_Gamma_divided_k2a_Session1_Accumbens,
-      color = Group)
-) +
-  geom_point(size = 2.5, alpha = 0.8) +
-  geom_smooth(method = "lm", color = "black", se = TRUE, linewidth = 1.2) +
-  scale_color_manual(values = c("#440154FF", "#22A884FF", "#D55E00"), name = "Group") + 
-  labs(
-    x = "Later change (Block4 − Block3)\nOutcome-to-cue Δ NAcc beta weights",
-    y = "PET γ/k2a in NAcc"
-  ) +
-  theme_minimal(base_size = 16) +
-  theme(
-    axis.title = element_text(size = 16),
-    axis.text  = element_text(size = 14),
-    legend.position = "bottom",
-    legend.title = element_text(size = 14),
-    legend.text  = element_text(size = 13)
-  )
-
-p_scatter_late
-ggsave("figs/pet_scatter_later_change.png", p_scatter_late, width = 8, height = 6, dpi = 300)
-```
-
-## 12. Save outputs
-
-```{r}
-write.csv(df_with_clusters, "outputs/cluster_assignments_final.csv", row.names = FALSE)
-
-df_full_clustered <- df %>%
-  left_join(df_with_clusters %>% select(ID, cluster), by = "ID")
-
-write.csv(df_full_clustered, "outputs/full_data_with_clusters_final.csv", row.names = FALSE)
-```
-
-## 13. Cluster predictability (multinomial models)
-
-```{r}
+```{r classifier, eval=FALSE}
+# This section requires caret and nnet and is disabled during routine knitting.
 library(caret)
 library(nnet)
-library(MLmetrics)
-library(pROC)
 
-run_block_model <- function(data, predictor) {
-  
-  df <- data %>%
-    select(cluster, all_of(predictor)) %>%
-    na.omit()
-  
-  df$cluster <- as.factor(as.character(df$cluster))
-  
-  ctrl <- trainControl(
-    method          = "repeatedcv",
-    number          = 10,
-    repeats         = 5,
-    classProbs      = TRUE,
-    summaryFunction = multiClassSummary,
-    savePredictions = "final"
+classifier_data <- features_scaled %>%
+  rownames_to_column("ID") %>%
+  inner_join(cluster_assignments, by = "ID") %>%
+  mutate(
+    cluster = factor(cluster, levels = 1:3, labels = c("C1", "C2", "C3"))
   )
-  
-  model <- train(
-    cluster ~ .,
-    data      = df,
-    method    = "multinom",
+
+ctrl <- trainControl(
+  method = "repeatedcv",
+  number = 10,
+  repeats = 5,
+  classProbs = TRUE,
+  summaryFunction = multiClassSummary,
+  savePredictions = "final"
+)
+
+predictors <- c("Block1", "Block2", "Block3", "Block4")
+cv_models <- lapply(predictors, function(p) {
+  train(
+    reformulate(p, response = "cluster"),
+    data = classifier_data,
+    method = "multinom",
     trControl = ctrl,
-    trace     = FALSE
+    trace = FALSE
   )
-  
-  best_idx <- which.max(model$results$Accuracy)
-  
-  list(
-    model    = model,
-    accuracy = model$results$Accuracy[best_idx],
-    auc      = model$results$AUC[best_idx]
-  )
+})
+names(cv_models) <- predictors
+```
+
+# Final manuscript figures
+
+The final manuscript figures are generated from `Source Data.xlsx`, which contains the values deposited with the manuscript. The R script reproduces Fig. 2 and the R-based supplementary figures; the Python script reproduces main Figs. 3–5 and the Python-based supplementary figures. Keeping these scripts separate from the inferential workflow above ensures that the displayed figures are generated directly from the deposited source data.
+
+## 14. R-based figures
+
+```{r reproduce-r-figures, eval=file.exists("Source Data.xlsx") && file.exists("plot_figures_from_source.R"), results='hide'}
+source("plot_figures_from_source.R", local = new.env(parent = globalenv()))
+```
+
+```{r show-fig2, echo=FALSE, out.width='100%', fig.cap='Figure 2. Individual reward-to-cue trajectories for the K = 3 consensus clustering solution.'}
+if (file.exists("figures/Fig2.png")) {
+  knitr::include_graphics("figures/Fig2.png")
 }
+```
 
-dat <- df_with_clusters[, c("ID", "cluster")] %>%
-  cbind(features_scaled)
+The R source-data script also reproduces the clustering diagnostics and sensitivity/control figures, including Supplementary Figs. 5–10, 13, and 16–18.
 
-dat$Early   <- dat$Block2 - dat$Block1
-dat$Later   <- dat$Block4 - dat$Block3
-dat$Overall <- dat$Block4 - dat$Block1
-dat$Ortho   <- residuals(lm(Block4 ~ Block1, dat))
+## 15. Python-based main figures
 
-dat$cluster <- factor(dat$cluster,
-                      levels = c(1, 2, 3),
-                      labels = c("C1", "C2", "C3"))
+```{r reproduce-python-figures, eval=file.exists("Source Data.xlsx") && file.exists("plot_figures_from_source.py"), results='hide'}
+python_ok <- nzchar(Sys.which("python3"))
+if (python_ok) {
+  system2("python3", "plot_figures_from_source.py")
+}
+```
 
-predictors <- c("Block1","Block2","Block3","Block4",
-                "Early","Later","Overall","Ortho")
+```{r show-main-figures, echo=FALSE, out.width='100%'}
+main_figs <- c("Fig3.png", "Fig4.png", "Fig5.png")
+main_paths <- file.path("figures", main_figs)
+existing_main <- main_paths[file.exists(main_paths)]
+if (length(existing_main)) knitr::include_graphics(existing_main)
+```
 
-results <- lapply(predictors, function(p) run_block_model(dat, p))
-names(results) <- predictors
+# Reproducibility outputs
 
-summary_df <- data.frame(
-  Predictor = predictors,
-  Accuracy  = sapply(results, `[[`, "accuracy"),
-  AUC       = sapply(results, `[[`, "auc")
+```{r save-analysis-data}
+write_csv(
+  df_clustered %>%
+    select(ID, Sex, Age, Placebo1_Med0, Block, shift, cluster),
+  "outputs/primary_reward_to_cue_with_clusters.csv"
 )
 
-print(summary_df)
-
-write.csv(summary_df, "outputs/cluster_predictability_summary.csv", row.names = FALSE)
-```
-
-## 14. Apply clustering model to the independent MDD-HC dataset
-
-```{r}
-df_new <- read.csv("data/tabulated_data_secondary.csv")
-
-stopifnot(all(c("CUE_Accumbens_Reward", "CUE_Accumbens_Neutral",
-                "FEED_Accumbens_Reward", "FEED_Accumbens_Neutral",
-                "diagnosis", "treatment") %in% names(df_new)))
-
-roi_cols_new <- colnames(df_new[, c(3:6)])
-
-df_new_wins <- df_new %>%
-  group_by(diagnosis, treatment) %>%
-  mutate(across(all_of(roi_cols_new), winsorize_iqr)) %>%
-  ungroup()
-
-df_new_wins <- df_new_wins %>%
-  mutate(
-    CUE_Accumbens   = CUE_Accumbens_Reward  - CUE_Accumbens_Neutral,
-    FEED_Accumbens  = FEED_Accumbens_Reward  - FEED_Accumbens_Neutral,
-    SHIFT_Accumbens = CUE_Accumbens - FEED_Accumbens
-  )
-
-glimpse(df_new_wins)
-```
-
-## 14a. Train final model and apply to new data
-
-```{r}
-best_predictor <- "Block4"
-
-# Train final model on full original data
-train_data <- dat %>%
-  select(cluster, all_of(best_predictor)) %>%
-  na.omit()
-
-model_final <- multinom(cluster ~ .,
-                        data  = train_data,
-                        trace = FALSE)
-
-pred_probs <- predict(model_final,
-                      newdata = data.frame(Block4 = df_new_wins$SHIFT_Accumbens),
-                      type    = "probs")
-
-df_new_wins$cluster_pred <- colnames(pred_probs)[max.col(pred_probs)]
-
-write.csv(df_new_wins,
-          "outputs/new_dataset_with_predicted_clusters.csv",
-          row.names = FALSE)
-```
-
-## 14b. ANCOVA: SHIFT_Accumbens ~ diagnosis × treatment
-
-```{r}
-model_new <- lm(SHIFT_Accumbens ~ diagnosis * treatment + age + gender,
-                data = df_new_wins)
-anova(model_new)
-
-emm_new   <- emmeans(model_new, ~ diagnosis * treatment)
-pairs_new <- pairs(emm_new, adjust = "none")
-summary(pairs_new)
-```
-
-## 14c. Violin plot: SHIFT_Accumbens by treatment and diagnosis
-
-```{r}
-p_new_violin <- ggplot(df_new_wins,
-                       aes(x = treatment, y = SHIFT_Accumbens, fill = treatment)) +
-  geom_violin(trim = FALSE, alpha = 0.4, color = NA) +
-  geom_boxplot(width = 0.18, outlier.shape = NA, alpha = 0.8) +
-  geom_jitter(width = 0.08, alpha = 0.35, size = 1.4) +
-  scale_fill_manual(values = c("#22A884FF", "#440154FF")) +
-  facet_wrap(~ diagnosis, ncol = 4) +
-  labs(
-    x = "Treatment arm",
-    y = "Reward-to-cue shift\nNAcc BOLD beta weights"
-  ) +
-  theme_minimal(base_size = 16) +
-  theme(
-    plot.title      = element_text(size = 20, face = "bold"),
-    axis.title      = element_text(size = 16),
-    axis.text       = element_text(size = 14),
-    legend.position = "none"
-  )
-
-p_new_violin
-ggsave("figs/new_dataset_violin_shift.png", p_new_violin, width = 10, height = 5, dpi = 300)
-```
-
-## 14d. Predicted group distribution by diagnosis and treatment
-
-```{r}
-df_new_wins <- df_new_wins %>%
-  mutate(predicted = ifelse(cluster_pred == "C1", "Group 1", "Group 2"))
-
-p_pred_bar <- ggplot(df_new_wins, aes(x = predicted, fill = diagnosis)) +
-  geom_bar(position = "fill") +
-  scale_fill_brewer(palette = "Set1") +
-  facet_wrap(~ treatment) +
-  labs(
-    x    = "Predicted Group",
-    y    = "Proportion",
-    fill = "Diagnosis"
-  ) +
-  theme_minimal(base_size = 16) +
-  theme(
-    axis.title   = element_text(size = 16),
-    axis.text    = element_text(size = 14),
-    legend.title = element_text(size = 14),
-    legend.text  = element_text(size = 13)
-  )
-
-p_pred_bar
-ggsave("figs/new_dataset_predicted_group_by_diagnosis.png", p_pred_bar,
-       width = 8, height = 5, dpi = 300)
-```
-
-## 14e. Fisher's Exact Tests and OR homogeneity (Woolf's test)
-
-```{r}
-se_logOR <- function(tbl) {
-  a <- tbl[1, 1]; b <- tbl[1, 2]
-  c <- tbl[2, 1]; d <- tbl[2, 2]
-  sqrt(1/a + 1/b + 1/c + 1/d)
-}
-
-# Contingency tables by treatment arm 
-matrix_a <- table(
-  df_new_wins$cluster_pred[df_new_wins$treatment == "a"],
-  df_new_wins$diagnosis[df_new_wins$treatment == "a"]
-)
-matrix_p <- table(
-  df_new_wins$cluster_pred[df_new_wins$treatment == "p"],
-  df_new_wins$diagnosis[df_new_wins$treatment == "p"]
+write_csv(
+  df %>% inner_join(cluster_assignments, by = "ID"),
+  "outputs/full_data_with_clusters_final.csv"
 )
 
-# Fisher's Exact Tests
-fisher_a <- fisher.test(matrix_a, alternative = "two.sided",
-                        conf.int = TRUE, conf.level = 0.95)
-fisher_p <- fisher.test(matrix_p, alternative = "two.sided",
-                        conf.int = TRUE, conf.level = 0.95)
-
-SE_a <- se_logOR(matrix_a)
-SE_p <- se_logOR(matrix_p)
-
-# Z-test comparing ORs across arms
-Z_stat  <- (log(fisher_a$estimate) - log(fisher_p$estimate)) / sqrt(SE_a^2 + SE_p^2)
-p_value <- 2 * pnorm(-abs(Z_stat))
-
-cat("Z statistic     :", round(Z_stat, 4), "\n")
-cat("Two-tailed p    :", round(p_value, 4), "\n")
-
-# Woolf's homogeneity of ORs test
-log_OR_homogeneity_test <- function(tables_list) {
-  log_ors <- c()
-  weights  <- c()
-
-  for (tbl in tables_list) {
-    a <- tbl[1, 1]; b <- tbl[1, 2]
-    c <- tbl[2, 1]; d <- tbl[2, 2]
-
-    # Add 0.5 correction if any cell is zero
-    if (any(c(a, b, c, d) == 0)) {
-      a <- a + 0.5; b <- b + 0.5; c <- c + 0.5; d <- d + 0.5
-    }
-
-    log_or     <- log((a * d) / (b * c))
-    var_log_or <- 1/a + 1/b + 1/c + 1/d
-
-    log_ors <- c(log_ors, log_or)
-    weights  <- c(weights, 1 / var_log_or)
-  }
-
-  pooled_log_or <- sum(weights * log_ors) / sum(weights)
-  Q             <- sum(weights * (log_ors - pooled_log_or)^2)
-  df_test       <- length(tables_list) - 1
-  p_homogeneity <- pchisq(Q, df = df_test, lower.tail = FALSE)
-
-  cat("\n=== Homogeneity of ORs Test (Woolf's Test) ===")
-  cat("\n  Stratum log(OR)s     :", round(log_ors, 4))
-  cat("\n  Pooled log(OR)       :", round(pooled_log_or, 4))
-  cat("\n  Pooled OR            :", round(exp(pooled_log_or), 4))
-  cat("\n  Q statistic          :", round(Q, 4))
-  cat("\n  Degrees of freedom   :", df_test)
-  cat("\n  P-value (homogeneity):", round(p_homogeneity, 4))
-
-  if (p_homogeneity < 0.05) {
-    cat("\n  Result: ** ORs are NOT homogeneous ** across strata (effect modification present)")
-  } else {
-    cat("\n  Result: ORs are homogeneous across strata (CMH pooled OR is valid)")
-  }
-  cat("\n===============================================\n")
-}
-
-log_OR_homogeneity_test(list(matrix_a, matrix_p))
+write_csv(
+  df_secondary %>%
+    select(ID, diagnosis, treatment, Sex, age, cue_contrast, outcome_contrast, shift),
+  "outputs/secondary_reward_to_cue.csv"
+)
 ```
 
-## 14f. Forest plot of ORs by treatment arm
+# Session information
 
-```{r}
-forest_data <- data.frame(
-  Stratum     = c("a", "p"),
-  OR          = c(fisher_a$estimate,    fisher_p$estimate),
-  lower       = c(fisher_a$conf.int[1], fisher_p$conf.int[1]),
-  upper       = c(fisher_a$conf.int[2], fisher_p$conf.int[2]),
-  pval        = c(fisher_a$p.value,     fisher_p$p.value),
-  significant = c(fisher_a$p.value < 0.05, fisher_p$p.value < 0.05)
-) %>%
-  mutate(
-    or_label = sprintf("OR = %.2f [%.2f\u2013%.2f]\np = %.3f", OR, lower, upper, pval),
-    Stratum  = factor(Stratum, levels = c("a", "p"))
-  )
-
-p_forest <- ggplot(forest_data, aes(x = OR, y = Stratum, color = significant)) +
-  geom_errorbarh(aes(xmin = lower, xmax = upper),
-                 height = 0.15, linewidth = 1.2) +
-  geom_point(aes(shape = significant), size = 5) +
-  geom_vline(xintercept = 1, linetype = "dashed",
-             color = "gray40", linewidth = 0.9) +
-  geom_text(aes(x = 9, label = or_label),
-            hjust = 0, size = 3.5, lineheight = 1.3) +
-  scale_color_manual(
-    values = c("TRUE"  = "#C0392B",
-               "FALSE" = "#2980B9"),
-    labels = c("TRUE"  = "p < 0.05",
-               "FALSE" = "p > 0.05"),
-    name   = "Significance"
-  ) +
-  scale_shape_manual(
-    values = c("TRUE" = 18, "FALSE" = 16),
-    guide  = "none"
-  ) +
-  scale_x_log10(
-    limits = c(0.005, 20),
-    breaks = c(0.01, 0.1, 0.5, 1, 2, 5),
-    labels = c("0.01", "0.1", "0.5", "1", "2", "5")
-  ) +
-  annotate("rect", xmin = 0.005, xmax = 1,
-           ymin = -Inf, ymax = Inf,
-           fill = "#E8DAEF", alpha = 0.25) +
-  annotate("text", x = 0.08, y = 0.4,
-           label = "MDD \u2192 Group 1\n(outcome-dominant)",
-           color = "gray30", size = 3, fontface = "italic") +
-  annotate("text", x = 3.5, y = 0.4,
-           label = "MDD \u2192 Group 2\n(cue-driven)",
-           color = "gray30", size = 3, fontface = "italic") +
-  labs(
-    x       = "Odds Ratio: Group 2 vs Group 1 (MDD relative to HC)  [log scale]",
-    y       = "Treatment Arm",
-    caption = paste0("OR < 1: MDD enriched in Group 1 relative to HC\n",
-                     "OR > 1: MDD enriched in Group 2 relative to HC\n",
-                     "Woolf's Homogeneity test: p = 0.011")
-  ) +
-  theme_bw(base_size = 13) +
-  theme(
-    panel.grid.minor   = element_blank(),
-    panel.grid.major.y = element_blank(),
-    legend.position    = "bottom",
-    plot.caption       = element_text(hjust = 0, size = 10, color = "gray40"),
-    plot.title         = element_text(face = "bold", size = 13),
-    axis.text.y        = element_text(size = 12, face = "bold")
-  )
-
-p_forest
-ggsave("figs/forest_plot_OR_by_treatment.png", p_forest, width = 10, height = 5, dpi = 300)
+```{r session-info}
+sessionInfo()
 ```
