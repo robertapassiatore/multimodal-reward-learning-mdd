@@ -88,12 +88,12 @@ Condition-specific NAcc beta estimates are winsorized using a 1.5 × IQR rule an
 ```{r preprocess-primary}
 df_roi <- df %>%
   select(
-    ID, Sex, Age, Placebo1_Med0,
+    ID, Sex, Age, 
     matches("Accumbens_(small|medium|large|neutral)_(cue|FB)_block\\d+")
   ) %>%
   select(-matches("Session"))
 
-id_vars <- c("ID", "Sex", "Age", "Placebo1_Med0")
+id_vars <- c("ID", "Sex", "Age")
 roi_cols <- setdiff(names(df_roi), id_vars)
 
 winsorize_iqr <- function(x) {
@@ -130,10 +130,10 @@ df_long <- df_roi_wins %>%
       TRUE ~ NA_character_
     )
   ) %>%
-  select(ID, Sex, Age, Placebo1_Med0, Reward, Block, Phase, BOLD)
+  select(ID, Sex, Age, Reward, Block, Phase, BOLD)
 
 df_diff <- df_long %>%
-  group_by(ID, Sex, Age, Placebo1_Med0, Block, Phase) %>%
+  group_by(ID, Sex, Age, Block, Phase) %>%
   summarise(
     large_vs_neutral  = BOLD[Reward == "large"][1]  - BOLD[Reward == "neutral"][1],
     medium_vs_neutral = BOLD[Reward == "medium"][1] - BOLD[Reward == "neutral"][1],
@@ -399,8 +399,7 @@ stopifnot(file.exists(secondary_file))
 df_secondary <- read_csv(secondary_file, show_col_types = FALSE) %>%
   select(-any_of("Unnamed: 0")) %>%
   mutate(
-    ID = as.character(ID),
-    Sex = gender
+    ID = as.character(ID)
   )
 
 secondary_roi_cols <- c(
@@ -513,7 +512,7 @@ if (length(existing_main)) knitr::include_graphics(existing_main)
 ```{r save-analysis-data}
 write_csv(
   df_clustered %>%
-    select(ID, Sex, Age, Placebo1_Med0, Block, shift, cluster),
+    select(ID, Sex, Age, Block, shift, cluster),
   "outputs/primary_reward_to_cue_with_clusters.csv"
 )
 
