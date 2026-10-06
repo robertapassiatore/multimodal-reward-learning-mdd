@@ -43,6 +43,9 @@ jobs:
             any::nnet
             any::MLmetrics
             any::pROC
+            any::emmeans
+            any::ggdendro
+            any::ggnewscale
 
       - name: Render to README.md
         run: |
