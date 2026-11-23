@@ -1,4 +1,6 @@
-Individual Differences in Reward Learning Reveal Distinct Dopamine Responsivity and Anhedonia Profiles in Major Depression
+Individual differences in reward learning reveal dopaminergic
+value-updating profiles linked to anhedonia and case-control differences
+in major depressive disorder
 ================
 
 - [Overview](#overview)
@@ -876,13 +878,13 @@ write_csv(
 sessionInfo()
 ```
 
-    ## R version 4.6.1 (2026-06-24)
+    ## R version 4.6.2 (2026-10-29)
     ## Platform: x86_64-pc-linux-gnu
-    ## Running under: Ubuntu 24.04.5 LTS
+    ## Running under: Ubuntu 26.04.1 LTS
     ## 
     ## Matrix products: default
     ## BLAS:   /usr/lib/x86_64-linux-gnu/openblas-pthread/libblas.so.3 
-    ## LAPACK: /usr/lib/x86_64-linux-gnu/openblas-pthread/libopenblasp-r0.3.26.so;  LAPACK version 3.12.0
+    ## LAPACK: /usr/lib/x86_64-linux-gnu/openblas-pthread/libopenblasp-r0.3.32.so;  LAPACK version 3.12.0
     ## 
     ## locale:
     ##  [1] LC_CTYPE=C.UTF-8       LC_NUMERIC=C           LC_TIME=C.UTF-8       
@@ -897,32 +899,32 @@ sessionInfo()
     ## [1] stats     graphics  grDevices utils     datasets  methods   base     
     ## 
     ## other attached packages:
-    ##  [1] patchwork_1.3.2             mclust_6.1.3               
-    ##  [3] cluster_2.1.8.2             ConsensusClusterPlus_1.76.0
+    ##  [1] patchwork_1.3.2             mclust_6.1.4               
+    ##  [3] cluster_2.1.8.3             ConsensusClusterPlus_1.76.0
     ##  [5] broom_1.0.13                emmeans_2.0.4              
-    ##  [7] lmerTest_3.2-1              lme4_2.0-6                 
-    ##  [9] Matrix_1.7-5                tibble_3.3.1               
-    ## [11] stringr_1.6.0               ggplot2_4.0.3              
+    ##  [7] lmerTest_3.2-1              lme4_2.1-0                 
+    ##  [9] Matrix_1.7-6                tibble_3.3.1               
+    ## [11] stringr_1.6.0               ggplot2_4.0.4              
     ## [13] tidyr_1.3.2                 dplyr_1.2.1                
-    ## [15] readxl_1.5.0.1              readr_2.2.0                
+    ## [15] readxl_1.6.0                readr_2.2.0                
     ## 
     ## loaded via a namespace (and not attached):
-    ##  [1] gtable_0.3.6        xfun_0.61           Biobase_2.72.0     
-    ##  [4] lattice_0.22-9      tzdb_0.5.0          numDeriv_2016.8-1.1
-    ##  [7] vctrs_0.7.3         tools_4.6.1         Rdpack_2.6.6       
-    ## [10] generics_0.1.4      pbkrtest_0.5.5      parallel_4.6.1     
+    ##  [1] gtable_0.3.6        xfun_0.62           Biobase_2.72.0     
+    ##  [4] lattice_0.23-1      tzdb_0.5.0          numDeriv_2016.8-1.1
+    ##  [7] vctrs_0.7.3         tools_4.6.2         Rdpack_2.6.6       
+    ## [10] generics_0.1.4      pbkrtest_0.5.5      parallel_4.6.2     
     ## [13] pkgconfig_2.0.3     ggnewscale_0.5.2    RColorBrewer_1.1-3 
-    ## [16] S7_0.2.2            lifecycle_1.0.5     compiler_4.6.1     
+    ## [16] S7_1.0.0            lifecycle_1.0.5     compiler_4.6.2     
     ## [19] farver_2.1.2        htmltools_0.5.9     yaml_2.3.12        
     ## [22] crayon_1.5.3        pillar_1.11.1       nloptr_2.2.1       
-    ## [25] MASS_7.3-65         reformulas_0.4.4    boot_1.3-32        
-    ## [28] nlme_3.1-169        tidyselect_1.2.1    digest_0.6.39      
+    ## [25] MASS_7.3-66         reformulas_0.4.4    boot_1.3-32        
+    ## [28] nlme_3.1-171        tidyselect_1.2.1    digest_0.6.39      
     ## [31] mvtnorm_1.4-2       stringi_1.8.9       purrr_1.2.2        
-    ## [34] splines_4.6.1       fastmap_1.2.0       grid_4.6.1         
+    ## [34] splines_4.6.2       fastmap_1.2.0       grid_4.6.2         
     ## [37] cli_3.6.6           magrittr_2.0.5      withr_3.0.3        
     ## [40] scales_1.4.0        backports_1.5.1     bit64_4.8.6        
     ## [43] estimability_2.0.0  rmarkdown_2.32      bit_4.6.0          
-    ## [46] otel_0.2.0          cellranger_1.1.0    hms_1.1.4          
+    ## [46] otel_0.3.0          cellranger_1.1.0    hms_1.1.4          
     ## [49] evaluate_1.0.5      knitr_1.52          rbibutils_2.4.1    
     ## [52] rlang_1.3.0         ggdendro_0.2.0      Rcpp_1.1.2         
     ## [55] glue_1.8.1          BiocGenerics_0.58.1 vroom_1.7.1        
