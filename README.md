@@ -1,4 +1,6 @@
-Individual Differences in Reward Learning Reveal Distinct Dopamine Responsivity and Anhedonia Profiles in Major Depression
+Individual differences in reward learning reveal dopaminergic
+value-updating profiles linked to anhedonia and case-control differences
+in major depressive disorder
 ================
 
 - [Overview](#overview)
